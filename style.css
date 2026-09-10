@@ -104,9 +104,17 @@ header { display: flex; align-items: center; justify-content: space-between; pad
 .layout {
   display: grid; grid-template-columns: 168px 1fr 320px;
   gap: 14px; height: 100%; min-height: 0; padding-top: 4px; position: relative;
+  align-items: stretch;
 }
 nav.side { grid-column: 1; display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
-aside.right { grid-column: 3; display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+aside.right {
+  grid-column: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
 .nav-item { display: flex; align-items: flex-start; gap: 12px; padding: 9px 10px; border-radius: 12px; cursor: pointer; }
 .nav-item:hover, .nav-item.active { background: rgba(80, 150, 255, 0.08); }
 .nav-item.active { box-shadow: inset 0 0 0 1px rgba(120,190,255,0.18); }
@@ -178,7 +186,7 @@ aside.right { grid-column: 3; display: flex; flex-direction: column; gap: 12px; 
 .hour .t { font-size: 10px; color: var(--muted); margin-bottom: 6px; }
 .hour .ico { height: 20px; display: grid; place-items: center; color: #f3d27a; }
 .hour .d { font-size: 12px; color: #dce8f8; margin-top: 5px; font-weight: 500; }
-.music { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; }
+.music { padding: 12px 14px 10px; display: flex; flex-direction: column; gap: 10px; flex: 0 0 auto; margin-top: 0; }
 .now { display: flex; align-items: center; gap: 12px; }
 .art { width: 52px; height: 52px; border-radius: 10px; overflow: hidden; flex-shrink: 0; background: #0a101c; }
 .art img { width: 100%; height: 100%; object-fit: cover; display: block; }
@@ -368,3 +376,12 @@ aside.right { grid-column: 3; display: flex; flex-direction: column; gap: 12px; 
   overflow-y: auto; scrollbar-width: none; -ms-overflow-style: none;
 }
 .layout.chat-mode .thread::-webkit-scrollbar { width: 0; height: 0; display: none; }
+#scPlayer {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+  left: -9999px;
+  bottom: auto;
+}
