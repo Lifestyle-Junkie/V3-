@@ -359,10 +359,12 @@ function renderMd(el, text) {
   });
 }
 function paintBotText(bodyEl, text) {
+  bodyEl.classList.remove("think-row");
   const parsed = parseSources(text);
   renderMd(bodyEl, parsed.body);
   const line = bodyEl.parentNode;
   if (!line) return bodyEl;
+  line.classList.remove("thinking");
   const old = line.querySelector(".src-row");
   if (old) old.remove();
   if (parsed.links.length) line.appendChild(sourceRow(parsed.links));
@@ -392,17 +394,29 @@ function formatThink(ms) {
   return m + ":" + (Number(s) < 10 ? "0" + s : s);
 }
 function startThink(el) {
-  stopThink();
+  stopThink(el);
   thinkStarted = performance.now();
-  el.textContent = "0.0s";
+  const line = el.parentNode;
+  if (line) line.classList.add("thinking");
+  el.classList.add("think-row");
+  el.textContent = "";
+  const orb = document.createElement("span");
+  orb.className = "mini-orb";
+  const sec = document.createElement("span");
+  sec.className = "think-sec";
+  sec.textContent = "0.0s";
+  el.appendChild(orb);
+  el.appendChild(sec);
   thinkTimer = setInterval(() => {
-    if (!el.isConnected) { stopThink(); return; }
-    el.textContent = formatThink(performance.now() - thinkStarted);
+    if (!el.isConnected) { stopThink(el); return; }
+    sec.textContent = formatThink(performance.now() - thinkStarted);
   }, 100);
 }
-function stopThink() {
+function stopThink(el) {
   if (thinkTimer) clearInterval(thinkTimer);
   thinkTimer = null;
+  if (el && el.parentNode) el.parentNode.classList.remove("thinking");
+  if (el) el.classList.remove("think-row");
 }
 function detectWidget(text) {
   const q = (text || "").toLowerCase();
@@ -526,14 +540,14 @@ async function sendUserText(text) {
     });
     const data = await res.json();
     const reply = data.text || data.error || "No reply";
-    stopThink();
+    stopThink(waiting);
     paintBotText(waiting, reply);
     if (data.text) {
       topic.messages.push({ role: "assistant", content: data.text });
       speakHope(data.text);
     }
   } catch (err) {
-    stopThink();
+    stopThink(waiting);
     waiting.textContent = "Can't reach backend.";
   }
   thread.scrollTop = thread.scrollHeight;
