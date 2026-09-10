@@ -639,4 +639,36 @@ document.addEventListener("click", function once() {
   startWake();
   document.removeEventListener("click", once);
 }, { once: true });
+
+const VIEW_ORDER = ["home", "chat", "music", "maps", "weather"];
+function currentView() {
+  const on = document.querySelector(".nav-item.active");
+  const v = ((on && on.getAttribute("data-view")) || "").toLowerCase();
+  return VIEW_ORDER.includes(v) ? v : "home";
+}
+function goView(name) {
+  const item = document.querySelector('.nav-item[data-view="' + name + '"]');
+  if (!item) return;
+  document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+  item.classList.add("active");
+  setView(name);
+}
+function shiftView(dir) {
+  const i = VIEW_ORDER.indexOf(currentView());
+  goView(VIEW_ORDER[(i + dir + VIEW_ORDER.length) % VIEW_ORDER.length]);
+}
+let dragX = null;
+document.addEventListener("pointerdown", e => {
+  if (e.target.closest("input,textarea,button,a,.search,.thread,.nav-item,.mp-map,#homeMap")) return;
+  dragX = e.clientX;
+});
+document.addEventListener("pointerup", e => {
+  if (dragX == null) return;
+  const dx = e.clientX - dragX;
+  dragX = null;
+  if (Math.abs(dx) < 90) return;
+  shiftView(dx < 0 ? 1 : -1);
+});
+document.addEventListener("pointercancel", () => { dragX = null; });
+
 renderTopics();
