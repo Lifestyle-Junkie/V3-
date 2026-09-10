@@ -281,6 +281,37 @@ aside.right::-webkit-scrollbar { display: none; }
 .txt { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; user-select: text; }
 .line.me .txt { color: #cfe8ff; }
 .line.bot .txt { color: #e8f1ff; }
+.line.bot .txt strong { font-weight: 650; color: #fff; }
+.think-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  white-space: nowrap;
+}
+.mini-orb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  position: relative;
+  flex-shrink: 0;
+  background: radial-gradient(circle at 40% 35%, #cfe8ff 0 18%, #4ea0ff 42%, #16325a 100%);
+  box-shadow: 0 0 10px rgba(120,200,255,0.7);
+}
+.mini-orb::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  border-radius: 50%;
+  border: 1px solid rgba(140,210,255,0.45);
+}
+.line.thinking .mini-orb {
+  animation: orbPulse 1.1s ease-in-out infinite;
+}
+.think-sec {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  color: #9ec4ef;
+}
 .src-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .src-ico {
   width: 22px; height: 22px; border-radius: 6px; overflow: hidden;
