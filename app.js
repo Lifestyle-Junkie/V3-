@@ -22,6 +22,8 @@ let hopeVoice = null;
 let micOn = false;
 let rec = null;
 let wakeRec = null;
+let thinkTimer = null;
+let thinkStarted = 0;
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
@@ -382,6 +384,26 @@ function addLine(who, text, cls) {
   thread.scrollTop = thread.scrollHeight;
   return body;
 }
+function formatThink(ms) {
+  const t = Math.max(0, ms / 1000);
+  if (t < 60) return t.toFixed(1) + "s";
+  const m = Math.floor(t / 60);
+  const s = (t - m * 60).toFixed(1);
+  return m + ":" + (Number(s) < 10 ? "0" + s : s);
+}
+function startThink(el) {
+  stopThink();
+  thinkStarted = performance.now();
+  el.textContent = "0.0s";
+  thinkTimer = setInterval(() => {
+    if (!el.isConnected) { stopThink(); return; }
+    el.textContent = formatThink(performance.now() - thinkStarted);
+  }, 100);
+}
+function stopThink() {
+  if (thinkTimer) clearInterval(thinkTimer);
+  thinkTimer = null;
+}
 function detectWidget(text) {
   const q = (text || "").toLowerCase();
   if (detectPlay(text) || detectNearMe(text) || detectWeatherAsk(text)) return null;
@@ -491,7 +513,8 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-  const waiting = addLine("Hope", "Searching…", "bot");
+  const waiting = addLine("Hope", "0.0s", "bot");
+  startThink(waiting);
   try {
     const res = await fetch("/api/chat", {
       method: "POST",
@@ -503,12 +526,14 @@ async function sendUserText(text) {
     });
     const data = await res.json();
     const reply = data.text || data.error || "No reply";
+    stopThink();
     paintBotText(waiting, reply);
     if (data.text) {
       topic.messages.push({ role: "assistant", content: data.text });
       speakHope(data.text);
     }
   } catch (err) {
+    stopThink();
     waiting.textContent = "Can't reach backend.";
   }
   thread.scrollTop = thread.scrollHeight;
