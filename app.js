@@ -10,7 +10,6 @@ const mhPlay = document.getElementById("mhPlay");
 const scFrame = document.getElementById("scPlayer");
 const mhSearchForm = document.getElementById("mhSearchForm");
 const mhSearch = document.getElementById("mhSearch");
-
 let busy = false;
 let topics = [{ id: 1, title: "New topic", messages: [] }];
 let currentId = 1;
@@ -23,14 +22,12 @@ let hopeVoice = null;
 let micOn = false;
 let rec = null;
 let wakeRec = null;
-
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
   weather: ".card.weather",
   music: ".card.music"
 };
-
 function tickClock() {
   const now = new Date();
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -43,11 +40,9 @@ function tickClock() {
 }
 tickClock();
 setInterval(tickClock, 1000);
-
 if (collapseBtn) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
 if (histCollapse) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
-
 function hideHuds() {
   const weatherHud = document.getElementById("weatherHud");
   const mapsHud = document.getElementById("mapsHud");
@@ -65,7 +60,6 @@ function hideHuds() {
   if (right) right.style.removeProperty("display");
   if (hist) hist.style.removeProperty("display");
 }
-
 function setView(view) {
   layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode");
   hideHuds();
@@ -102,7 +96,6 @@ function setView(view) {
   }
   if (view === "home") setTimeout(resizeHomeMap, 50);
 }
-
 function setPlayIcon(playing) {
   musicPlaying = playing;
   const pauseSm = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="7" y="5" width="3.2" height="14" rx="1"/><rect x="14" y="5" width="3.2" height="14" rx="1"/></svg>';
@@ -114,14 +107,12 @@ function setPlayIcon(playing) {
   }
   document.querySelectorAll(".card.music .play").forEach(btn => { btn.innerHTML = playing ? pauseSm : playSm; });
 }
-
 function splitTitle(raw) {
   const t = (raw || "").trim();
   const m = t.match(/^(.*)\s+by\s+(.+)$/i);
   if (m) return { title: m[1].trim(), artist: m[2].trim() };
   return { title: t || currentSong.title, artist: currentSong.artist || "" };
 }
-
 function paintSong(title, artist, art) {
   if (title) currentSong.title = title;
   if (artist) currentSong.artist = artist;
@@ -147,19 +138,17 @@ function paintSong(title, artist, art) {
     if (img && currentSong.art) img.src = currentSong.art;
   });
 }
-
 function syncFromWidget() {
   if (!scWidget) return;
   scWidget.getCurrentSound(sound => {
     if (!sound) return;
     const title = sound.title || currentSong.title;
-    const artist = (sound.user && sound.user.username) or currentSong.artist;
+    const artist = (sound.user && sound.user.username) || currentSong.artist;
     let art = sound.artwork_url || (sound.user && sound.user.avatar_url) || "";
     if (art) art = art.replace("-large", "-t500x500");
     paintSong(title, artist, art);
   });
 }
-
 function playUrl(url) {
   currentSong.url = url;
   if (!scWidget) bindSoundCloud();
@@ -167,7 +156,6 @@ function playUrl(url) {
   scWidget.load(url, { auto_play: true });
   setTimeout(() => { try { scWidget.play(); } catch (e) {} }, 700);
 }
-
 async function requestSong(query) {
   const q = (query || "").trim();
   if (!q) return null;
@@ -179,7 +167,6 @@ async function requestSong(query) {
   playUrl(data.url);
   return data;
 }
-
 function insertChatMusicCard() {
   const line = document.createElement("div");
   line.className = "line widget";
@@ -199,20 +186,17 @@ function insertChatMusicCard() {
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
 }
-
 function detectPlay(text) {
   const q = (text || "").trim();
   const m = q.match(/^(?:play|put on|start|queue)\s+(?:the\s+song\s+)?(.+?)(?:\s+on\s+soundcloud)?$/i);
   if (m) return m[1].replace(/[.?!]+$/, "").trim();
   return null;
 }
-
 function togglePlay() {
   if (!scWidget) bindSoundCloud();
   if (!scWidget) return;
   scWidget.isPaused(paused => { if (paused) scWidget.play(); else scWidget.pause(); });
 }
-
 function bindSoundCloud() {
   if (!scFrame || typeof SC === "undefined" || !SC.Widget) return;
   if (scWidget) return;
@@ -228,10 +212,8 @@ function bindSoundCloud() {
     }
   });
 }
-
 if (document.readyState === "complete") bindSoundCloud();
 else window.addEventListener("load", bindSoundCloud);
-
 if (mhPlay) mhPlay.addEventListener("click", togglePlay);
 document.querySelectorAll("aside.right .card.music .play").forEach(btn => btn.addEventListener("click", togglePlay));
 if (mhSearchForm) {
@@ -243,7 +225,6 @@ if (mhSearchForm) {
     try { await requestSong(q); } catch (err) { paintSong("Not found", q, ""); }
   });
 }
-
 function openWidget(name) {
   setView("chat");
   if (name === "music") { insertChatMusicCard(); return; }
@@ -263,7 +244,6 @@ function openWidget(name) {
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
 }
-
 document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
     document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
@@ -273,16 +253,13 @@ document.querySelectorAll(".nav-item").forEach(item => {
     setView(fromAttr || fromLabel || "home");
   });
 });
-
 function currentTopic() {
   return topics.find(t => t.id === currentId) || topics[0];
 }
-
 function shortTitle(text) {
   const s = (text || "").replace(/\s+/g, " ").trim();
   return s.length > 36 ? s.slice(0, 36) + "…" : s || "New topic";
 }
-
 function renderThread() {
   thread.innerHTML = "";
   currentTopic().messages.forEach(m => {
@@ -290,7 +267,6 @@ function renderThread() {
     else addLine(m.role === "user" ? "You" : "Hope", m.content, m.role === "user" ? "me" : "bot");
   });
 }
-
 function renderTopics() {
   if (!histList) return;
   histList.innerHTML = "";
@@ -315,7 +291,6 @@ function renderTopics() {
     histList.appendChild(el);
   });
 }
-
 function startTopic() {
   topics.unshift({ id: nextId++, title: "New topic", messages: [] });
   currentId = topics[0].id;
@@ -323,7 +298,6 @@ function startTopic() {
   renderTopics();
   input.focus();
 }
-
 function addLine(who, text, cls) {
   const line = document.createElement("div");
   line.className = "line " + cls;
@@ -339,7 +313,6 @@ function addLine(who, text, cls) {
   thread.scrollTop = thread.scrollHeight;
   return body;
 }
-
 function detectWidget(text) {
   const q = (text || "").toLowerCase();
   if (detectPlay(text) || detectNearMe(text) || detectWeatherAsk(text)) return null;
@@ -351,22 +324,18 @@ function detectWidget(text) {
   if (/\bstocks?|markets?\b/.test(q)) return "stocks";
   return null;
 }
-
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
-
 function setOrbTalking(on) {
   const orb = document.querySelector(".orb-wrap");
   if (orb) orb.classList.toggle("speaking", !!on);
 }
-
 function stripWake(text) {
   return (text || "")
     .replace(/^\s*(hey\s+)?hope[,.\s]*/i, "")
     .trim();
 }
-
 async function speakHope(text) {
   if (!voiceOn || !text) return;
   try {
@@ -390,7 +359,6 @@ async function speakHope(text) {
     setOrbTalking(false);
   }
 }
-
 async function sendUserText(text) {
   text = (text || "").trim();
   if (!text || busy) return;
@@ -401,7 +369,6 @@ async function sendUserText(text) {
   if (topic.title === "New topic") topic.title = shortTitle(text);
   renderTopics();
   input.value = "";
-
   if (typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
     goToWeatherTab();
     topic.messages.push({ role: "widget", content: "weather" });
@@ -454,7 +421,6 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-
   const waiting = addLine("Hope", "Searching…", "bot");
   try {
     const res = await fetch("/api/chat", {
@@ -478,12 +444,10 @@ async function sendUserText(text) {
   busy = false;
   input.focus();
 }
-
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   await sendUserText(input.value);
 });
-
 const voiceToggle = document.querySelector(".toggle");
 if (voiceToggle) {
   voiceToggle.classList.add("on");
@@ -496,13 +460,11 @@ if (voiceToggle) {
     }
   });
 }
-
 const micBtn = document.querySelector(".search svg") && document.querySelector(".search svg").closest("span,button,div");
 function setMicLook(on) {
   const wrap = document.querySelector(".search");
   if (wrap) wrap.classList.toggle("listening", on);
 }
-
 function startMic(commandMode) {
   const Ctor = SpeechEngine();
   if (!Ctor) return;
@@ -529,14 +491,12 @@ function startMic(commandMode) {
   micOn = true;
   setMicLook(true);
 }
-
 function stopMic() {
   try { if (rec) rec.stop(); } catch (e) {}
   rec = null;
   micOn = false;
   setMicLook(false);
 }
-
 if (micBtn) {
   micBtn.style.cursor = "pointer";
   micBtn.addEventListener("click", e => {
@@ -545,7 +505,6 @@ if (micBtn) {
     else startMic(false);
   });
 }
-
 function startWake() {
   const Ctor = SpeechEngine();
   if (!Ctor || wakeRec) return;
@@ -566,10 +525,8 @@ function startWake() {
   };
   try { wakeRec.start(); } catch (e) {}
 }
-
 document.addEventListener("click", function once() {
   startWake();
   document.removeEventListener("click", once);
 }, { once: true });
-
 renderTopics();
