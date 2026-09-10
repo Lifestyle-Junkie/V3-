@@ -298,6 +298,50 @@ function startTopic() {
   renderTopics();
   input.focus();
 }
+function parseSources(text) {
+  const raw = String(text || "");
+  const split = raw.split(/\nSources:\s*/i);
+  const body = (split[0] || "").trim();
+  const rest = split.slice(1).join("\n");
+  const links = [];
+  const re = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+  let m;
+  while ((m = re.exec(rest))) links.push({ title: m[1], url: m[2] });
+  if (!links.length) {
+    (rest.match(/https?:\/\/[^\s)]+/g) || []).forEach(url => links.push({ title: url, url }));
+  }
+  return { body: links.length ? body : raw, links };
+}
+function sourceRow(links) {
+  const row = document.createElement("div");
+  row.className = "src-row";
+  links.forEach(link => {
+    const a = document.createElement("a");
+    a.className = "src-ico";
+    a.href = link.url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.title = link.title;
+    const img = document.createElement("img");
+    try {
+      img.src = "https://www.google.com/s2/favicons?domain=" + encodeURIComponent(new URL(link.url).hostname) + "&sz=64";
+    } catch (e) {}
+    img.alt = link.title;
+    a.appendChild(img);
+    row.appendChild(a);
+  });
+  return row;
+}
+function paintBotText(bodyEl, text) {
+  const parsed = parseSources(text);
+  bodyEl.textContent = parsed.body;
+  const line = bodyEl.parentNode;
+  if (!line) return bodyEl;
+  const old = line.querySelector(".src-row");
+  if (old) old.remove();
+  if (parsed.links.length) line.appendChild(sourceRow(parsed.links));
+  return bodyEl;
+}
 function addLine(who, text, cls) {
   const line = document.createElement("div");
   line.className = "line " + cls;
@@ -306,9 +350,10 @@ function addLine(who, text, cls) {
   label.textContent = who;
   const body = document.createElement("div");
   body.className = "txt";
-  body.textContent = text;
   line.appendChild(label);
   line.appendChild(body);
+  if (cls === "bot") paintBotText(body, text);
+  else body.textContent = text;
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
   return body;
@@ -343,10 +388,11 @@ async function speakHope(text) {
       hopeVoice.pause();
       hopeVoice.src = "";
     }
+    const spoken = parseSources(text).body;
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: String(text).slice(0, 1200) }),
+      body: JSON.stringify({ text: String(spoken).slice(0, 1200) }),
     });
     if (!res.ok) return;
     const blob = await res.blob();
@@ -432,7 +478,8 @@ async function sendUserText(text) {
       }),
     });
     const data = await res.json();
-    waiting.textContent = data.text || data.error || "No reply";
+    const reply = data.text || data.error || "No reply";
+    paintBotText(waiting, reply);
     if (data.text) {
       topic.messages.push({ role: "assistant", content: data.text });
       speakHope(data.text);
