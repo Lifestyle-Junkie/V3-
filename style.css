@@ -281,6 +281,14 @@ aside.right::-webkit-scrollbar { display: none; }
 .txt { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; user-select: text; }
 .line.me .txt { color: #cfe8ff; }
 .line.bot .txt { color: #e8f1ff; }
+.src-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.src-ico {
+  width: 22px; height: 22px; border-radius: 6px; overflow: hidden;
+  display: grid; place-items: center;
+  background: rgba(8,16,32,0.7);
+  border: 1px solid rgba(130,190,255,0.28);
+}
+.src-ico img { width: 16px; height: 16px; display: block; }
 .line.widget { max-width: 320px; margin: 4px auto 14px; align-items: stretch; text-align: left; }
 .line.widget .card { width: 320px; max-width: 100%; pointer-events: auto; }
 .line.widget .nearby { height: 168px; }
