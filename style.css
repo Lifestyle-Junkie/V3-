@@ -310,12 +310,52 @@ aside.right::-webkit-scrollbar { display: none; }
 .thread::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .line { display: flex; flex-direction: column; margin: 0 0 10px; max-width: 78%; }
 .line.me { margin-left: auto; align-items: flex-end; text-align: right; }
-.line.bot { margin-right: auto; align-items: flex-start; text-align: left; }
+.line.bot { margin-right: auto; align-items: flex-start; text-align: left; max-width: 92%; }
 .who { display: none; }
 .txt { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; user-select: text; }
 .line.me .txt { color: #cfe8ff; }
-.line.bot .txt { color: #e8f1ff; }
+.line.bot .txt { color: #e8f1ff; white-space: normal; }
 .line.bot .txt strong { font-weight: 650; color: #fff; }
+.bot-card {
+  background: rgba(8,16,32,0.45);
+  border: 1px solid rgba(120,190,255,0.16);
+  border-radius: 14px;
+  padding: 10px 12px 8px;
+  margin: 0 0 10px;
+}
+.bot-h {
+  font-size: 14px;
+  font-weight: 650;
+  color: #e8f1ff;
+  margin: 0 0 8px;
+  letter-spacing: 0.02em;
+}
+.bot-p { margin: 0 0 6px; font-size: 13px; color: #d7e7ff; }
+.bot-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 0;
+}
+.bot-table-wrap::-webkit-scrollbar { display: none; }
+.bot-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.bot-table th, .bot-table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(120,180,255,0.14);
+  white-space: nowrap;
+}
+.bot-table th {
+  color: #9bb6d4;
+  font-weight: 600;
+  font-size: 12px;
+}
+.bot-table td { color: #e8f1ff; }
+.bot-table tr:last-child td { border-bottom: 0; }
 .think-row {
   display: flex;
   align-items: center;
@@ -481,6 +521,7 @@ aside.right::-webkit-scrollbar { display: none; }
   overflow-y: auto; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
 }
 .layout.chat-mode .thread::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.layout.chat-mode .line.bot { max-width: min(720px, 96%); }
 #scPlayer {
   position: absolute;
   width: 1px;
