@@ -332,9 +332,33 @@ function sourceRow(links) {
   });
   return row;
 }
+function stripMd(text) {
+  return String(text || "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/`(.+?)`/g, "$1");
+}
+function renderMd(el, text) {
+  el.textContent = "";
+  const parts = String(text || "").split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  parts.forEach(part => {
+    if (!part) return;
+    if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+      const b = document.createElement("strong");
+      b.textContent = part.slice(2, -2);
+      el.appendChild(b);
+    } else if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      const c = document.createElement("code");
+      c.textContent = part.slice(1, -1);
+      el.appendChild(c);
+    } else {
+      el.appendChild(document.createTextNode(part));
+    }
+  });
+}
 function paintBotText(bodyEl, text) {
   const parsed = parseSources(text);
-  bodyEl.textContent = parsed.body;
+  renderMd(bodyEl, parsed.body);
   const line = bodyEl.parentNode;
   if (!line) return bodyEl;
   const old = line.querySelector(".src-row");
@@ -388,7 +412,7 @@ async function speakHope(text) {
       hopeVoice.pause();
       hopeVoice.src = "";
     }
-    const spoken = parseSources(text).body;
+    const spoken = stripMd(parseSources(text).body);
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
