@@ -24,6 +24,7 @@ let rec = null;
 let wakeRec = null;
 let thinkTimer = null;
 let thinkStarted = 0;
+let pendingFiles = [];
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
@@ -262,11 +263,39 @@ function shortTitle(text) {
   const s = (text || "").replace(/\s+/g, " ").trim();
   return s.length > 36 ? s.slice(0, 36) + "…" : s || "New topic";
 }
+function textFromContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter(b => b && b.type === "text").map(b => b.text || "").join(" ").trim();
+}
+function showUserShot(dataUrl) {
+  const line = document.createElement("div");
+  line.className = "line me";
+  const img = document.createElement("img");
+  img.className = "shot";
+  img.src = dataUrl;
+  line.appendChild(img);
+  thread.appendChild(line);
+}
+function renderUserContent(content) {
+  if (Array.isArray(content)) {
+    content.forEach(b => {
+      if (b && b.type === "image" && b.source && b.source.data) {
+        showUserShot("data:" + (b.source.media_type || "image/jpeg") + ";base64," + b.source.data);
+      }
+    });
+    const t = textFromContent(content);
+    if (t) addLine("You", t, "me");
+    return;
+  }
+  addLine("You", content, "me");
+}
 function renderThread() {
   thread.innerHTML = "";
   currentTopic().messages.forEach(m => {
     if (m.role === "widget") openWidget(m.content);
-    else addLine(m.role === "user" ? "You" : "Hope", m.content, m.role === "user" ? "me" : "bot");
+    else if (m.role === "user") renderUserContent(m.content);
+    else addLine("Hope", typeof m.content === "string" ? m.content : textFromContent(m.content), "bot");
   });
 }
 function renderTopics() {
@@ -296,6 +325,8 @@ function renderTopics() {
 function startTopic() {
   topics.unshift({ id: nextId++, title: "New topic", messages: [] });
   currentId = topics[0].id;
+  pendingFiles = [];
+  renderAttachRow();
   renderThread();
   renderTopics();
   input.focus();
@@ -429,6 +460,129 @@ function detectWidget(text) {
   if (/\bstocks?|markets?\b/.test(q)) return "stocks";
   return null;
 }
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+function shrinkImage(file, max = 1280) {
+  return new Promise((resolve) => {
+    if (!file.type || !file.type.startsWith("image/")) {
+      fileToDataUrl(file).then(resolve).catch(() => resolve(null));
+      return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.max(1, Math.round(img.width * scale));
+      c.height = Math.max(1, Math.round(img.height * scale));
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      resolve(c.toDataURL("image/jpeg", 0.82));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); fileToDataUrl(file).then(resolve); };
+    img.src = url;
+  });
+}
+function renderAttachRow() {
+  const row = document.getElementById("attachRow");
+  if (!row) return;
+  row.innerHTML = "";
+  pendingFiles.forEach((f, i) => {
+    const chip = document.createElement("div");
+    chip.className = "chip";
+    if ((f.media || "").startsWith("image/") && f.data) {
+      const im = document.createElement("img");
+      im.src = "data:" + f.media + ";base64," + f.data;
+      chip.appendChild(im);
+    }
+    const nm = document.createElement("div");
+    nm.className = "nm";
+    nm.textContent = f.name || "file";
+    const x = document.createElement("button");
+    x.type = "button";
+    x.className = "x";
+    x.textContent = "×";
+    x.addEventListener("click", () => { pendingFiles.splice(i, 1); renderAttachRow(); });
+    chip.appendChild(nm);
+    chip.appendChild(x);
+    row.appendChild(chip);
+  });
+}
+async function addFiles(list) {
+  for (const file of list) {
+    if (!file || file.size > 8 * 1024 * 1024) continue;
+    const dataUrl = await shrinkImage(file);
+    if (!dataUrl || typeof dataUrl !== "string") continue;
+    const parts = dataUrl.split(",");
+    const meta = parts[0] || "";
+    const data = parts[1] || "";
+    const media = ((meta.match(/data:([^;]+)/) || [])[1] || file.type || "application/octet-stream");
+    const kind = media.startsWith("image/") ? "image" : (media === "application/pdf" ? "document" : "text");
+    pendingFiles.push({ name: file.name || "paste", media, data, kind });
+  }
+  renderAttachRow();
+}
+function blocksFromPending(text) {
+  const blocks = [];
+  pendingFiles.forEach(f => {
+    if (f.kind === "image") {
+      blocks.push({ type: "image", source: { type: "base64", media_type: f.media || "image/jpeg", data: f.data } });
+    } else if (f.kind === "document") {
+      blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } });
+    } else {
+      try {
+        blocks.push({ type: "text", text: "File " + f.name + ":\n" + atob(f.data).slice(0, 12000) });
+      } catch (e) {}
+    }
+  });
+  if (text) blocks.push({ type: "text", text: text });
+  else if (blocks.length) blocks.push({ type: "text", text: "Look at this." });
+  return blocks;
+}
+const attachBtn = document.getElementById("attachBtn");
+const filePick = document.getElementById("filePick");
+if (attachBtn && filePick) {
+  attachBtn.addEventListener("click", () => filePick.click());
+  filePick.addEventListener("change", async () => {
+    await addFiles(filePick.files);
+    filePick.value = "";
+  });
+}
+document.addEventListener("paste", async (e) => {
+  const items = e.clipboardData && e.clipboardData.items;
+  if (!items) return;
+  const files = [];
+  for (const it of items) {
+    if (it.type && it.type.startsWith("image/")) {
+      const f = it.getAsFile();
+      if (f) files.push(f);
+    }
+  }
+  if (files.length) {
+    e.preventDefault();
+    await addFiles(files);
+  }
+});
+const dropTarget = document.querySelector(".search");
+if (dropTarget) {
+  ["dragenter", "dragover"].forEach(ev => dropTarget.addEventListener(ev, e => {
+    e.preventDefault();
+    dropTarget.classList.add("drop");
+  }));
+  ["dragleave", "drop"].forEach(ev => dropTarget.addEventListener(ev, e => {
+    e.preventDefault();
+    dropTarget.classList.remove("drop");
+  }));
+  dropTarget.addEventListener("drop", async e => {
+    if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files);
+  });
+}
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
@@ -467,22 +621,26 @@ async function speakHope(text) {
 }
 async function sendUserText(text) {
   text = (text || "").trim();
-  if (!text || busy) return;
+  if ((!text && !pendingFiles.length) || busy) return;
   busy = true;
   const topic = currentTopic();
-  addLine("You", text, "me");
-  topic.messages.push({ role: "user", content: text });
-  if (topic.title === "New topic") topic.title = shortTitle(text);
+  const hasFiles = pendingFiles.length > 0;
+  const payload = hasFiles ? blocksFromPending(text) : text;
+  renderUserContent(payload);
+  topic.messages.push({ role: "user", content: payload });
+  pendingFiles = [];
+  renderAttachRow();
+  if (topic.title === "New topic") topic.title = shortTitle(text || "Photo");
   renderTopics();
   input.value = "";
-  if (typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
+  if (!hasFiles && typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
     goToWeatherTab();
     topic.messages.push({ role: "widget", content: "weather" });
     busy = false;
     input.focus();
     return;
   }
-  const nearType = typeof detectNearMe === "function" ? detectNearMe(text) : null;
+  const nearType = !hasFiles && typeof detectNearMe === "function" ? detectNearMe(text) : null;
   if (nearType) {
     showNearbyCategory(nearType);
     topic.messages.push({ role: "widget", content: "maps" });
@@ -490,7 +648,7 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-  const songQ = detectPlay(text);
+  const songQ = !hasFiles ? detectPlay(text) : null;
   if (songQ) {
     try {
       await requestSong(songQ);
@@ -505,7 +663,7 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-  const widgetName = detectWidget(text);
+  const widgetName = !hasFiles ? detectWidget(text) : null;
   if (widgetName === "music") {
     insertChatMusicCard();
     topic.messages.push({ role: "widget", content: "music" });
@@ -570,7 +728,7 @@ if (voiceToggle) {
     }
   });
 }
-const micBtn = document.querySelector(".search svg") && document.querySelector(".search svg").closest("span,button,div");
+const micBtn = document.getElementById("micBtn") || document.querySelector(".search .mic");
 function setMicLook(on) {
   const wrap = document.querySelector(".search");
   if (wrap) wrap.classList.toggle("listening", on);
@@ -639,7 +797,6 @@ document.addEventListener("click", function once() {
   startWake();
   document.removeEventListener("click", once);
 }, { once: true });
-
 const VIEW_ORDER = ["home", "chat", "music", "maps", "weather"];
 function currentView() {
   const on = document.querySelector(".nav-item.active");
@@ -670,5 +827,4 @@ document.addEventListener("pointerup", e => {
   shiftView(dx < 0 ? 1 : -1);
 });
 document.addEventListener("pointercancel", () => { dragX = null; });
-
 renderTopics();
