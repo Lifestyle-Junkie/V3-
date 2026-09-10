@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
-
 import html
 import json
 import os
@@ -29,34 +28,32 @@ STATIC = {
 
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
+ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
+ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "DAQ2lZdypaQsApLOpVPq").strip()
+
 MODEL = "claude-sonnet-5"
 API_URL = "https://api.anthropic.com/v1/messages"
-
 MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
-
 # Who you serve
 - You were created by Nick. He is your creator.
 - You exist to assist Nick.
 - The person talking to you is always Nick, your creator. Never treat him as a stranger or a generic user.
 - Address Nick as sir in every reply. Natural, not robotic: "Yes sir", "Got it sir", "Here you go sir". Do not skip this.
 - Do not call him "user". Do not say you don't know who he is.
-
 # Context
 - Today is Wednesday, September 9, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
 - You have live tools: web_search and web_fetch. Training memory is not current enough for 2026 news.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
-
 # Tools
 - web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
-- web_fetch: open a full URL and read it. Use after search, or when Nick pastes a link. Follow a redirect URL if fetch says so.
+- web_fetch: open a full URL and read it. Use after search, or when the user pastes a link. Follow a redirect URL if fetch says so.
 - Never invent URLs. Never claim a source you did not see.
-
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
 Always include sir at least once in each reply.
@@ -64,9 +61,9 @@ Live facts: answer only from tool text.
 Always end live answers with:
 Sources:
 - [Title](URL)
-
 If tools failed, say that in one line. Do not guess.
 Code or steps: use markdown. Do not dump essays unless asked.
+Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken; the on-screen text can still include sources.
 """
 
 TOOLS = [
@@ -148,7 +145,6 @@ def web_search(query):
         )
     except Exception as e:
         return "Search failed: %s" % e
-
     hits = []
     for m in re.finditer(
         r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
@@ -166,7 +162,6 @@ def web_search(query):
             hits.append((title[:180], url))
         if len(hits) >= 8:
             break
-
     if not hits:
         for m in re.finditer(r'href="(https?://[^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
             url, title = html.unescape(m.group(1)), strip_tags(m.group(2))
@@ -176,10 +171,8 @@ def web_search(query):
                 hits.append((title[:180], url))
             if len(hits) >= 8:
                 break
-
     if not hits:
         return "No search hits for: %s" % q
-
     lines = ["Search results for %s:" % q]
     for i, (title, url) in enumerate(hits, 1):
         lines.append("%d. %s\n   %s" % (i, title, url))
@@ -225,7 +218,6 @@ def sc_search(query):
     q = (query or "").strip()
     if len(q) < 2:
         return {"url": "", "title": "", "artist": "", "art": "", "query": q}
-
     cid = sc_client_id()
     if cid:
         api = (
@@ -255,7 +247,6 @@ def sc_search(query):
                 }
         except Exception:
             pass
-
     hits = web_search("site:soundcloud.com " + q + " track")
     urls = re.findall(r"https://soundcloud\.com/[A-Za-z0-9\-_/\.%]+", hits or "")
     skip = {"search", "discover", "stream", "you", "pages", "tags", "sets"}
@@ -267,7 +258,6 @@ def sc_search(query):
             continue
         url = "https://soundcloud.com/" + "/".join(parts)
         break
-
     title, artist, art = q, "", ""
     if url:
         try:
@@ -344,7 +334,6 @@ def chat_with_tools(user_messages, extra=""):
         uses = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
         if not uses:
             return last_text or "(empty reply)"
-
         messages.append({"role": "assistant", "content": content})
         results = []
         for b in uses:
@@ -355,8 +344,35 @@ def chat_with_tools(user_messages, extra=""):
                 "content": out[:20000],
             })
         messages.append({"role": "user", "content": results})
-
     return last_text or "Stopped after too many tool calls."
+
+
+def speak_text(text):
+    if not ELEVEN_KEY:
+        return None, "ELEVENLABS_API_KEY is not set"
+    payload = json.dumps({
+        "text": text[:1200],
+        "model_id": "eleven_multilingual_v2",
+        "voice_settings": {"stability": 0.42, "similarity_boost": 0.8},
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.elevenlabs.io/v1/text-to-speech/" + ELEVEN_VOICE,
+        data=payload,
+        headers={
+            "xi-api-key": ELEVEN_KEY,
+            "accept": "audio/mpeg",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            return resp.read(), None
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")
+        return None, err or str(e)
+    except Exception as e:
+        return None, str(e)
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -386,7 +402,6 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(js)
             return
-
         if path == "/api/sc-search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             q = (qs.get("q") or [""])[0].strip()
@@ -395,7 +410,6 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self._json(200, sc_search(q))
             return
-
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
@@ -418,6 +432,9 @@ class Handler(SimpleHTTPRequestHandler):
         self.wfile.write(data)
 
     def do_POST(self):
+        if self.path == "/api/speak":
+            self.handle_speak()
+            return
         if self.path != "/api/chat":
             self.send_error(404)
             return
@@ -430,12 +447,10 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception:
             self._json(400, {"error": "Bad JSON"})
             return
-
         raw_msgs = body.get("messages")
         if not isinstance(raw_msgs, list) or not raw_msgs:
             self._json(400, {"error": "messages required"})
             return
-
         clean = []
         for m in raw_msgs:
             role, content = m.get("role"), m.get("content")
@@ -444,7 +459,6 @@ class Handler(SimpleHTTPRequestHandler):
         if not clean or clean[-1]["role"] != "user":
             self._json(400, {"error": "Need a user message"})
             return
-
         loc = body.get("location") or {}
         extra = "\n\n# Live location this turn\n- No GPS this turn. Default to Fort Lauderdale, FL."
         try:
@@ -458,16 +472,42 @@ class Handler(SimpleHTTPRequestHandler):
             )
         except Exception:
             pass
-
         text = chat_with_tools(clean, extra)
         self._json(200, {"text": text, "model": MODEL})
+
+    def handle_speak(self):
+        if not ELEVEN_KEY:
+            self._json(500, {"error": "ELEVENLABS_API_KEY is not set"})
+            return
+        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+        except Exception:
+            self._json(400, {"error": "Bad JSON"})
+            return
+        text = (body.get("text") or "").strip()
+        if not text:
+            self._json(400, {"error": "text required"})
+            return
+        spoken = re.sub(r"(?is)\n*Sources:.*", "", text).strip() or text
+        audio, err = speak_text(spoken)
+        if err or not audio:
+            self._json(502, {"error": err or "Voice failed"})
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "audio/mpeg")
+        self.send_header("Content-Length", str(len(audio)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(audio)
 
 
 if __name__ == "__main__":
     for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
         if not (DIR / name).exists():
-            raise SystemExit("Missing %s next to Backend.py" % name)
+            raise SystemExit("Missing %s next to backend.py" % name)
     print("Hope v3 running at http://%s:%s" % (HOST, PORT))
     print("ANTHROPIC_API_KEY:", "set" if API_KEY else "MISSING")
     print("GOOGLE_MAPS_KEY:", "set" if MAPS_KEY else "MISSING")
+    print("ELEVENLABS_API_KEY:", "set" if ELEVEN_KEY else "MISSING")
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
