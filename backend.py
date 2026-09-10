@@ -45,11 +45,12 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Address Nick as sir in every reply. Natural, not robotic: "Yes sir", "Got it sir", "Here you go sir". Do not skip this.
 - Do not call him "user". Do not say you don't know who he is.
 # Context
-- Today is Wednesday, September 9, 2026.
+- Today is Thursday, September 10, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
 - You have live tools: web_search and web_fetch. Training memory is not current enough for 2026 news.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
+- Nick can attach photos and files. If an image or document is in the message history, you can see it. Use it on later turns in this thread. Refer to it as the photo or that file unless he names it. Do not say you cannot see an attachment that is already in the history. Do not only "analyze" and forget it.
 # Tools
 - web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
 - web_fetch: open a full URL and read it. Use after search, or when the user pastes a link. Follow a redirect URL if fetch says so.
@@ -321,6 +322,57 @@ def extract_text(content):
     return "".join(parts).strip()
 
 
+def clean_block(b):
+    if not isinstance(b, dict):
+        return None
+    kind = b.get("type")
+    if kind == "text":
+        t = (b.get("text") or "").strip()
+        return {"type": "text", "text": t} if t else None
+    if kind == "image":
+        src = b.get("source") or {}
+        data = (src.get("data") or "").strip()
+        media = (src.get("media_type") or "image/jpeg").split(";")[0].strip()
+        if src.get("type") == "base64" and data and media.startswith("image/"):
+            return {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media, "data": data},
+            }
+        return None
+    if kind == "document":
+        src = b.get("source") or {}
+        data = (src.get("data") or "").strip()
+        media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
+        if src.get("type") == "base64" and data:
+            return {
+                "type": "document",
+                "source": {"type": "base64", "media_type": media, "data": data},
+            }
+        return None
+    return None
+
+
+def clean_messages(raw_msgs):
+    clean = []
+    for m in raw_msgs:
+        role, content = m.get("role"), m.get("content")
+        if role not in ("user", "assistant"):
+            continue
+        if isinstance(content, str) and content.strip():
+            clean.append({"role": role, "content": content.strip()})
+            continue
+        if not isinstance(content, list):
+            continue
+        blocks = []
+        for b in content:
+            block = clean_block(b)
+            if block:
+                blocks.append(block)
+        if blocks:
+            clean.append({"role": role, "content": blocks})
+    return clean
+
+
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -442,6 +494,9 @@ class Handler(SimpleHTTPRequestHandler):
             self._json(500, {"error": "ANTHROPIC_API_KEY is not set"})
             return
         length = int(self.headers.get("Content-Length", "0"))
+        if length > 20 * 1024 * 1024:
+            self._json(413, {"error": "Attachment too large"})
+            return
         try:
             body = json.loads(self.rfile.read(length).decode("utf-8") or "{}")
         except Exception:
@@ -451,11 +506,7 @@ class Handler(SimpleHTTPRequestHandler):
         if not isinstance(raw_msgs, list) or not raw_msgs:
             self._json(400, {"error": "messages required"})
             return
-        clean = []
-        for m in raw_msgs:
-            role, content = m.get("role"), m.get("content")
-            if role in ("user", "assistant") and isinstance(content, str) and content.strip():
-                clean.append({"role": role, "content": content})
+        clean = clean_messages(raw_msgs)
         if not clean or clean[-1]["role"] != "user":
             self._json(400, {"error": "Need a user message"})
             return
