@@ -33,69 +33,66 @@ if (collapseBtn) collapseBtn.addEventListener("click", () => layout.classList.to
 if (histCollapse) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
 function hideHuds() {
-  const weatherHud = document.getElementById("weatherHud");
-  const mapsHud = document.getElementById("mapsHud");
-  const musicHud = document.getElementById("musicHud");
-  const capitalHud = document.getElementById("capitalHud");
+  ["musicHud", "mapsHud", "weatherHud", "capitalHud"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.cssText = "";
+    el.style.setProperty("display", "none", "important");
+  });
   const hero = document.querySelector(".hero");
   const right = document.querySelector("aside.right");
   const hist = document.getElementById("historyPane");
-  if (musicHud) musicHud.style.removeProperty("display");
-  if (mapsHud) mapsHud.style.removeProperty("display");
-  if (capitalHud) capitalHud.style.removeProperty("display");
-  if (weatherHud) {
-    weatherHud.style.cssText = "";
-    weatherHud.style.display = "none";
-  }
   if (hero) hero.style.removeProperty("display");
   if (right) right.style.removeProperty("display");
   if (hist) hist.style.removeProperty("display");
 }
-function setView(view) {
-  if (view === "holdings" || view === "stocks") view = "capital";
-  layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode", "capital-mode");
-  hideHuds();
-  const mapsHud = document.getElementById("mapsHud");
-  const musicHud = document.getElementById("musicHud");
-  const capitalHud = document.getElementById("capitalHud");
+function showHud(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.style.cssText = "";
+  el.style.setProperty("display", "grid", "important");
+}
+function coverHome() {
   const hero = document.querySelector(".hero");
   const right = document.querySelector("aside.right");
   const hist = document.getElementById("historyPane");
+  if (hero) hero.style.setProperty("display", "none", "important");
+  if (right) right.style.setProperty("display", "none", "important");
+  if (hist) hist.style.setProperty("display", "none", "important");
+}
+function setView(view) {
+  if (view === "holdings" || view === "stocks") view = "capital";
+  layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode", "capital-mode", "home-mode");
+  hideHuds();
   if (view === "chat") layout.classList.add("chat-mode");
   if (view === "music") {
     layout.classList.add("music-mode");
-    if (hero) hero.style.setProperty("display", "none", "important");
-    if (right) right.style.setProperty("display", "none", "important");
-    if (hist) hist.style.setProperty("display", "none", "important");
-    if (musicHud) musicHud.style.setProperty("display", "grid", "important");
+    coverHome();
+    showHud("musicHud");
   }
   if (view === "maps") {
     layout.classList.add("maps-mode");
-    if (hero) hero.style.setProperty("display", "none", "important");
-    if (right) right.style.setProperty("display", "none", "important");
-    if (hist) hist.style.setProperty("display", "none", "important");
-    if (mapsHud) mapsHud.style.setProperty("display", "grid", "important");
+    coverHome();
+    showHud("mapsHud");
     setTimeout(ensureMap, 40);
   }
   if (view === "weather") {
     layout.classList.add("weather-mode");
-    if (hero) hero.style.setProperty("display", "none", "important");
-    if (right) right.style.setProperty("display", "none", "important");
-    if (hist) hist.style.setProperty("display", "none", "important");
-    const weatherHud = ensureWeatherHud();
-    weatherHud.style.cssText = "";
-    weatherHud.style.setProperty("display", "grid", "important");
-    loadWeather(weatherPlace.lat, weatherPlace.lng, weatherPlace.name);
+    coverHome();
+    if (typeof ensureWeatherHud === "function") ensureWeatherHud();
+    showHud("weatherHud");
+    if (typeof loadWeather === "function") loadWeather(weatherPlace.lat, weatherPlace.lng, weatherPlace.name);
   }
   if (view === "capital") {
     layout.classList.add("capital-mode");
-    if (hero) hero.style.setProperty("display", "none", "important");
-    if (right) right.style.setProperty("display", "none", "important");
-    if (hist) hist.style.setProperty("display", "none", "important");
-    if (capitalHud) capitalHud.style.setProperty("display", "grid", "important");
+    coverHome();
+    showHud("capitalHud");
     if (typeof bootCapital === "function") bootCapital();
   }
-  if (view === "home") setTimeout(resizeHomeMap, 50);
+  if (view === "home" || !view) {
+    layout.classList.add("home-mode");
+    setTimeout(resizeHomeMap, 50);
+  }
 }
 function openWidget(name) {
   if (name === "capital" || name === "stocks" || name === "holdings") {
