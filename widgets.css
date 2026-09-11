@@ -23,7 +23,11 @@
 }
 .bell.has-note i { display: block; }
 
-.capital-hud { display: none; }
+.music-hud,
+.maps-hud,
+.weather-hud,
+.capital-hud { display: none !important; }
+
 .layout.capital-mode { grid-template-columns: 168px 1fr !important; }
 .layout.capital-mode.collapsed { grid-template-columns: 58px 1fr !important; }
 .layout.capital-mode .hero,
@@ -42,9 +46,26 @@
   padding: 4px 8px 6px 0;
   overflow: hidden;
 }
+.layout.music-mode .music-hud { display: grid !important; }
+.layout.maps-mode .maps-hud { display: grid !important; }
+.layout.weather-mode .weather-hud { display: grid !important; }
+.layout.music-mode .maps-hud,
+.layout.music-mode .weather-hud,
 .layout.music-mode .capital-hud,
+.layout.maps-mode .music-hud,
+.layout.maps-mode .weather-hud,
 .layout.maps-mode .capital-hud,
-.layout.weather-mode .capital-hud { display: none !important; }
+.layout.weather-mode .music-hud,
+.layout.weather-mode .maps-hud,
+.layout.weather-mode .capital-hud,
+.layout.home-mode .music-hud,
+.layout.home-mode .maps-hud,
+.layout.home-mode .weather-hud,
+.layout.home-mode .capital-hud,
+.layout.chat-mode .music-hud,
+.layout.chat-mode .maps-hud,
+.layout.chat-mode .weather-hud,
+.layout.chat-mode .capital-hud { display: none !important; }
 
 .cap-main {
   display: flex;
@@ -70,7 +91,6 @@
   cursor: pointer;
 }
 .cap-tabs button.on { color: #e8f1ff; border-bottom-color: #7ecbff; }
-
 .cap-worth {
   display: grid;
   grid-template-columns: 1fr 220px;
@@ -107,7 +127,6 @@
 .cap-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
 .cap-legend i.rh { background: #3ee07a; }
 .cap-legend i.cash { background: #3b82f6; }
-
 .cap-row2, .cap-row3 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .cap-card {
   background: rgba(8,14,28,0.72);
@@ -145,7 +164,6 @@
 .cap-hold img { width: 22px; height: 22px; border-radius: 6px; }
 .cap-hold .chg { color: #3ee07a; }
 .cap-alloc { min-height: 140px; }
-
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
 .cap-bills { font-size: 12px; }
