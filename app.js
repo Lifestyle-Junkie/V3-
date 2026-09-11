@@ -6,20 +6,17 @@ const collapseBtn = document.getElementById("collapseBtn");
 const histList = document.getElementById("histList");
 const histCollapse = document.getElementById("histCollapse");
 const newTopicBtn = document.getElementById("newTopic");
-
 let busy = false;
 let topics = [{ id: 1, title: "New topic", messages: [] }];
 let currentId = 1;
 let nextId = 2;
 let pendingFiles = [];
-
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
   weather: ".card.weather",
   music: ".card.music"
 };
-
 function tickClock() {
   const now = new Date();
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -32,20 +29,20 @@ function tickClock() {
 }
 tickClock();
 setInterval(tickClock, 1000);
-
 if (collapseBtn) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
 if (histCollapse) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
-
 function hideHuds() {
   const weatherHud = document.getElementById("weatherHud");
   const mapsHud = document.getElementById("mapsHud");
   const musicHud = document.getElementById("musicHud");
+  const capitalHud = document.getElementById("capitalHud");
   const hero = document.querySelector(".hero");
   const right = document.querySelector("aside.right");
   const hist = document.getElementById("historyPane");
   if (musicHud) musicHud.style.removeProperty("display");
   if (mapsHud) mapsHud.style.removeProperty("display");
+  if (capitalHud) capitalHud.style.removeProperty("display");
   if (weatherHud) {
     weatherHud.style.cssText = "";
     weatherHud.style.display = "none";
@@ -54,12 +51,13 @@ function hideHuds() {
   if (right) right.style.removeProperty("display");
   if (hist) hist.style.removeProperty("display");
 }
-
 function setView(view) {
-  layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode");
+  if (view === "holdings" || view === "stocks") view = "capital";
+  layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode", "capital-mode");
   hideHuds();
   const mapsHud = document.getElementById("mapsHud");
   const musicHud = document.getElementById("musicHud");
+  const capitalHud = document.getElementById("capitalHud");
   const hero = document.querySelector(".hero");
   const right = document.querySelector("aside.right");
   const hist = document.getElementById("historyPane");
@@ -89,10 +87,21 @@ function setView(view) {
     weatherHud.style.setProperty("display", "grid", "important");
     loadWeather(weatherPlace.lat, weatherPlace.lng, weatherPlace.name);
   }
+  if (view === "capital") {
+    layout.classList.add("capital-mode");
+    if (hero) hero.style.setProperty("display", "none", "important");
+    if (right) right.style.setProperty("display", "none", "important");
+    if (hist) hist.style.setProperty("display", "none", "important");
+    if (capitalHud) capitalHud.style.setProperty("display", "grid", "important");
+    if (typeof bootCapital === "function") bootCapital();
+  }
   if (view === "home") setTimeout(resizeHomeMap, 50);
 }
-
 function openWidget(name) {
+  if (name === "capital" || name === "stocks" || name === "holdings") {
+    goToCapitalTab();
+    return;
+  }
   setView("chat");
   if (name === "music") { insertChatMusicCard(); return; }
   if (name === "maps") { insertChatMapsCard(); return; }
@@ -111,7 +120,6 @@ function openWidget(name) {
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
 }
-
 document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
     document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
@@ -121,22 +129,18 @@ document.querySelectorAll(".nav-item").forEach(item => {
     setView(fromAttr || fromLabel || "home");
   });
 });
-
 function currentTopic() {
   return topics.find(t => t.id === currentId) || topics[0];
 }
-
 function shortTitle(text) {
   const s = (text || "").replace(/\s+/g, " ").trim();
   return s.length > 36 ? s.slice(0, 36) + "…" : s || "New topic";
 }
-
 function textFromContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return content.filter(b => b && b.type === "text").map(b => b.text || "").join(" ").trim();
 }
-
 function showUserShot(dataUrl) {
   const line = document.createElement("div");
   line.className = "line me";
@@ -146,7 +150,6 @@ function showUserShot(dataUrl) {
   line.appendChild(img);
   thread.appendChild(line);
 }
-
 function renderUserContent(content) {
   if (Array.isArray(content)) {
     content.forEach(b => {
@@ -160,7 +163,6 @@ function renderUserContent(content) {
   }
   addLine("You", content, "me");
 }
-
 function renderThread() {
   thread.innerHTML = "";
   currentTopic().messages.forEach(m => {
@@ -169,7 +171,6 @@ function renderThread() {
     else addLine("Hope", typeof m.content === "string" ? m.content : textFromContent(m.content), "bot");
   });
 }
-
 function renderTopics() {
   if (!histList) return;
   histList.innerHTML = "";
@@ -194,7 +195,6 @@ function renderTopics() {
     histList.appendChild(el);
   });
 }
-
 function startTopic() {
   topics.unshift({ id: nextId++, title: "New topic", messages: [] });
   currentId = topics[0].id;
@@ -204,7 +204,6 @@ function startTopic() {
   renderTopics();
   input.focus();
 }
-
 function addLine(who, text, cls) {
   const line = document.createElement("div");
   line.className = "line " + cls;
@@ -221,7 +220,6 @@ function addLine(who, text, cls) {
   thread.scrollTop = thread.scrollHeight;
   return body;
 }
-
 function detectWidget(text) {
   const q = (text || "").toLowerCase();
   if (typeof detectPlay === "function" && detectPlay(text)) return null;
@@ -232,10 +230,9 @@ function detectWidget(text) {
   if (/\bmusic\b/.test(q)) return "music";
   if (/\bmaps?|nearby|directions\b/.test(q)) return "maps";
   if (/\bweather|forecast\b/.test(q)) return "weather";
-  if (/\bstocks?|markets?\b/.test(q)) return "stocks";
+  if (/\bstocks?|markets?|holdings|capital|net worth|bills\b/.test(q)) return "capital";
   return null;
 }
-
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
     const r = new FileReader();
@@ -244,7 +241,6 @@ function fileToDataUrl(file) {
     r.readAsDataURL(file);
   });
 }
-
 function shrinkImage(file, max = 1280) {
   return new Promise((resolve) => {
     if (!file.type || !file.type.startsWith("image/")) {
@@ -266,7 +262,6 @@ function shrinkImage(file, max = 1280) {
     img.src = url;
   });
 }
-
 function renderAttachRow() {
   const row = document.getElementById("attachRow");
   if (!row) return;
@@ -292,7 +287,6 @@ function renderAttachRow() {
     row.appendChild(chip);
   });
 }
-
 async function addFiles(list) {
   for (const file of list) {
     if (!file || file.size > 8 * 1024 * 1024) continue;
@@ -307,7 +301,6 @@ async function addFiles(list) {
   }
   renderAttachRow();
 }
-
 function blocksFromPending(text) {
   const blocks = [];
   pendingFiles.forEach(f => {
@@ -325,7 +318,6 @@ function blocksFromPending(text) {
   else if (blocks.length) blocks.push({ type: "text", text: "Look at this." });
   return blocks;
 }
-
 const attachBtn = document.getElementById("attachBtn");
 const filePick = document.getElementById("filePick");
 if (attachBtn && filePick) {
@@ -335,7 +327,6 @@ if (attachBtn && filePick) {
     filePick.value = "";
   });
 }
-
 document.addEventListener("paste", async (e) => {
   const items = e.clipboardData && e.clipboardData.items;
   if (!items) return;
@@ -351,7 +342,6 @@ document.addEventListener("paste", async (e) => {
     await addFiles(files);
   }
 });
-
 const dropTarget = document.querySelector(".search");
 if (dropTarget) {
   ["dragenter", "dragover"].forEach(ev => dropTarget.addEventListener(ev, e => {
@@ -366,7 +356,6 @@ if (dropTarget) {
     if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files);
   });
 }
-
 async function sendUserText(text) {
   text = (text || "").trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -381,7 +370,6 @@ async function sendUserText(text) {
   if (topic.title === "New topic") topic.title = shortTitle(text || "Photo");
   renderTopics();
   input.value = "";
-
   if (!hasFiles && typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
     goToWeatherTab();
     topic.messages.push({ role: "widget", content: "weather" });
@@ -427,6 +415,13 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
+  if (widgetName === "capital") {
+    goToCapitalTab();
+    topic.messages.push({ role: "widget", content: "capital" });
+    busy = false;
+    input.focus();
+    return;
+  }
   if (widgetName) {
     openWidget(widgetName);
     topic.messages.push({ role: "widget", content: widgetName });
@@ -434,7 +429,6 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-
   const waiting = addLine("Hope", "0.0s", "bot");
   startThink(waiting);
   try {
@@ -462,13 +456,11 @@ async function sendUserText(text) {
   busy = false;
   input.focus();
 }
-
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   await sendUserText(input.value);
 });
-
-const VIEW_ORDER = ["home", "chat", "music", "maps", "weather"];
+const VIEW_ORDER = ["home", "chat", "music", "maps", "weather", "capital"];
 function currentView() {
   const on = document.querySelector(".nav-item.active");
   const v = ((on && on.getAttribute("data-view")) || "").toLowerCase();
@@ -498,5 +490,4 @@ document.addEventListener("pointerup", e => {
   shiftView(dx < 0 ? 1 : -1);
 });
 document.addEventListener("pointercancel", () => { dragX = null; });
-
 renderTopics();
