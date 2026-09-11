@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
@@ -37,6 +38,7 @@ API_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
+
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
@@ -53,7 +55,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Nick can attach photos and files. If an image or document is in the message history, you can see it. Use it on later turns in this thread. Refer to it as the photo or that file unless he names it. Do not say you cannot see an attachment that is already in the history. Do not only "analyze" and forget it.
 # Tools
 - web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
-- web_fetch: open a full URL and read it. Use after search, or when the user pastes a link. Follow a redirect URL if fetch says so.
+- web_fetch: open a full URL and read it. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.
 - Never invent URLs. Never claim a source you did not see.
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
@@ -82,6 +84,7 @@ If tools failed, say that in one line. Do not guess.
 Code or steps: use markdown. Do not dump essays unless asked.
 Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken; the on-screen text can still include sources.
 """
+
 TOOLS = [
     {
         "name": "web_search",
@@ -101,15 +104,14 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "url": {"type": "string", "description": "Full http(s) URL"},
-                "prompt": {
-                    "type": "string",
-                    "description": "What to extract from the page",
-                },
+                "prompt": {"type": "string", "description": "What to extract from the page"},
             },
             "required": ["url"],
         },
     },
 ]
+
+
 def http_get(url, timeout=20, data=None, headers=None):
     h = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HopeV3/1.0",
@@ -132,6 +134,8 @@ def http_get(url, timeout=20, data=None, headers=None):
     except LookupError:
         text = raw.decode("utf-8", errors="replace")
     return final, text
+
+
 def strip_tags(text):
     text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
     text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
@@ -142,6 +146,8 @@ def strip_tags(text):
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
 def web_search(query):
     q = (query or "").strip()
     if not q:
@@ -188,6 +194,8 @@ def web_search(query):
         lines.append("%d. %s\n   %s" % (i, title, url))
     lines.append("Fetch the best links next.")
     return "\n".join(lines)
+
+
 def web_fetch(url, prompt=""):
     url = (url or "").strip()
     if not url.startswith("http"):
@@ -199,6 +207,8 @@ def web_fetch(url, prompt=""):
     text = strip_tags(page)[:12000]
     note = "Focus: %s\n" % prompt if prompt else ""
     return "%sURL: %s\n\n%s" % (note, final, text or "(no text)")
+
+
 def sc_client_id():
     if _SC_CLIENT["id"] and time.time() - _SC_CLIENT["t"] < 3600:
         return _SC_CLIENT["id"]
@@ -218,6 +228,39 @@ def sc_client_id():
     except Exception:
         pass
     return _SC_CLIENT["id"]
+
+
+def nicer_art(url):
+    if not url:
+        return ""
+    return (
+        url.replace("-large", "-t500x500")
+        .replace("-badge", "-t500x500")
+        .replace("-small", "-t500x500")
+        .replace("-tiny", "-t500x500")
+    )
+
+
+def sc_oembed(url, fallback_title):
+    title, artist, art = fallback_title, "", ""
+    try:
+        _, raw = http_get(
+            "https://soundcloud.com/oembed?format=json&url="
+            + urllib.parse.quote(url, safe="")
+        )
+        meta = json.loads(raw)
+        title = meta.get("title") or fallback_title
+        art = nicer_art(meta.get("thumbnail_url") or "")
+        author = meta.get("author_name") or ""
+        if " - " in title:
+            artist, title = title.split(" - ", 1)
+        elif author:
+            artist = author
+    except Exception:
+        pass
+    return title, artist, art
+
+
 def sc_search(query):
     q = (query or "").strip()
     if len(q) < 2:
@@ -239,13 +282,18 @@ def sc_search(query):
                 if "soundcloud.com" not in url:
                     continue
                 user = item.get("user") or {}
-                art = item.get("artwork_url") or user.get("avatar_url") or ""
-                if art:
-                    art = art.replace("-large", "-t500x500")
+                art = nicer_art(item.get("artwork_url") or user.get("avatar_url") or "")
+                title = item.get("title") or q
+                artist = user.get("username") or ""
+                if not art:
+                    t2, a2, art2 = sc_oembed(url, title)
+                    art = art2 or art
+                    title = title or t2
+                    artist = artist or a2
                 return {
                     "url": url,
-                    "title": item.get("title") or q,
-                    "artist": user.get("username") or "",
+                    "title": title,
+                    "artist": artist,
                     "art": art,
                     "query": q,
                 }
@@ -264,23 +312,18 @@ def sc_search(query):
         break
     title, artist, art = q, "", ""
     if url:
-        try:
-            _, raw = http_get(
-                "https://soundcloud.com/oembed?format=json&url="
-                + urllib.parse.quote(url, safe="")
-            )
-            meta = json.loads(raw)
-            title = meta.get("title") or q
-            art = meta.get("thumbnail_url") or ""
-        except Exception:
-            pass
+        title, artist, art = sc_oembed(url, q)
     return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
+
+
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
     if name == "web_fetch":
         return web_fetch(args.get("url", ""), args.get("prompt", ""))
     return "Unknown tool: %s" % name
+
+
 def claude(messages, system=SYSTEM):
     payload = json.dumps({
         "model": MODEL,
@@ -311,12 +354,16 @@ def claude(messages, system=SYSTEM):
         return None, msg
     except Exception as e:
         return None, str(e)
+
+
 def extract_text(content):
     parts = []
     for block in content or []:
         if isinstance(block, dict) and block.get("type") == "text":
             parts.append(block.get("text") or "")
     return "".join(parts).strip()
+
+
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -345,6 +392,8 @@ def clean_block(b):
             }
         return None
     return None
+
+
 def clean_messages(raw_msgs):
     clean = []
     for m in raw_msgs:
@@ -364,6 +413,8 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
+
+
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -388,6 +439,8 @@ def chat_with_tools(user_messages, extra=""):
             })
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
+
+
 def speak_text(text):
     if not ELEVEN_KEY:
         return None, "ELEVENLABS_API_KEY is not set"
@@ -414,9 +467,12 @@ def speak_text(text):
         return None, err or str(e)
     except Exception as e:
         return None, str(e)
+
+
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
+
     def _json(self, code, obj):
         raw = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -425,13 +481,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(raw)
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/config.js":
-            js = (
-                "window.HOPE_MAPS_KEY=%s;\n"
-                % json.dumps(MAPS_KEY)
-            ).encode("utf-8")
+            js = ("window.HOPE_MAPS_KEY=%s;\n" % json.dumps(MAPS_KEY)).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/javascript; charset=utf-8")
             self.send_header("Content-Length", str(len(js)))
@@ -467,6 +521,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
@@ -509,6 +564,7 @@ class Handler(SimpleHTTPRequestHandler):
             pass
         text = chat_with_tools(clean, extra)
         self._json(200, {"text": text, "model": MODEL})
+
     def handle_speak(self):
         if not ELEVEN_KEY:
             self._json(500, {"error": "ELEVENLABS_API_KEY is not set"})
@@ -534,12 +590,10 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(audio)
+
+
 if __name__ == "__main__":
-    for name in (
-        "index.html", "style.css", "widgets.css",
-        "app.js", "maps.js", "weather.js",
-        "format.js", "music.js", "voice.js", "capital.js",
-    ):
+    for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
         if not (DIR / name).exists():
             raise SystemExit("Missing %s next to backend.py" % name)
     print("Hope v3 running at http://%s:%s" % (HOST, PORT))
