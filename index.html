@@ -36,6 +36,13 @@
           <div id="hdrTemp">☀ 87°</div>
           <div id="dateLabel">SEP 10, 2026</div>
           <div id="timeLabel">10:47 AM</div>
+          <button class="bell" id="bellBtn" type="button" aria-label="Notifications">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M18 8a6 6 0 1 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/>
+              <path d="M13.7 21a2 2 0 0 1-3.4 0"/>
+            </svg>
+            <i id="bellDot"></i>
+          </button>
         </div>
       </header>
       <div class="layout" id="layout">
@@ -60,9 +67,9 @@
             <div class="nav-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 15a8 8 0 0 1 16 0"/><path d="M12 3v4"/></svg></div>
             <div class="nav-txt"><div class="t">WEATHER</div><div class="s">Current conditions</div></div>
           </div>
-          <div class="nav-item">
+          <div class="nav-item" data-view="capital">
             <div class="nav-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 19V5M4 19h16"/><path d="M8 16l3-5 3 3 5-8"/></svg></div>
-            <div class="nav-txt"><div class="t">STOCKS</div><div class="s">Track markets</div></div>
+            <div class="nav-txt"><div class="t">HOLDINGS</div><div class="s">Capital board</div></div>
           </div>
           <div class="nav-item">
             <div class="nav-ico"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg></div>
@@ -400,6 +407,103 @@
             </div>
           </aside>
         </section>
+        <section class="capital-hud" id="capitalHud">
+          <div class="cap-main">
+            <div class="cap-head">
+              <div>
+                <div class="cap-k">CAPITAL HOLDINGS</div>
+                <div class="mh-s">Your wealth. A clearer tomorrow.</div>
+              </div>
+              <div class="cap-quote">“Discipline today. Freedom tomorrow.”</div>
+            </div>
+            <div class="cap-tabs">
+              <button type="button" class="on" data-cap-tab="overview">Overview</button>
+              <button type="button" data-cap-tab="portfolio">Portfolio</button>
+              <button type="button" data-cap-tab="history">History</button>
+              <button type="button" data-cap-tab="goals">Goals</button>
+              <button type="button" data-cap-tab="bills">Bills</button>
+            </div>
+            <div class="cap-worth">
+              <div class="cap-worth-l">
+                <div class="mh-s">TOTAL NET WORTH</div>
+                <div class="cap-big" id="capNet">$18,420.32</div>
+                <div class="cap-delta up" id="capDelta">▲ +$420.18 since last update (+2.33%)</div>
+                <div class="cap-delta up" id="capLife">▲ +$6,215.40 lifetime (+50.8%)</div>
+              </div>
+              <div class="cap-ranges">
+                <button type="button">1W</button>
+                <button type="button">1M</button>
+                <button type="button">3M</button>
+                <button type="button">6M</button>
+                <button type="button" class="on">1Y</button>
+                <button type="button">ALL</button>
+              </div>
+              <div class="cap-chart" id="capChart"></div>
+              <div class="cap-donut-mini">
+                <div class="mh-s">NET WORTH BREAKDOWN</div>
+                <div class="cap-pie" id="capPie"></div>
+                <div class="cap-legend">
+                  <div><i class="rh"></i> Robinhood 86% · $15,920.32</div>
+                  <div><i class="cash"></i> Cash (On Hand) 14% · $2,500.00</div>
+                </div>
+              </div>
+            </div>
+            <div class="cap-row2">
+              <div class="cap-card">
+                <div class="cap-src">
+                  <div>
+                    <div class="mh-s">ROBINHOOD</div>
+                    <div class="mh-t" id="capRhVal">$15,920.32</div>
+                    <div class="cap-delta up">+2.41% Today</div>
+                  </div>
+                  <span class="cap-pill on">Synced</span>
+                </div>
+              </div>
+              <div class="cap-card">
+                <div class="cap-src">
+                  <div>
+                    <div class="mh-s">CASH (ON HAND)</div>
+                    <div class="mh-t" id="capCashVal">$2,500.00</div>
+                    <div class="mh-s">Manual</div>
+                  </div>
+                  <button type="button" class="cap-edit" id="capCashEdit">Edit</button>
+                </div>
+              </div>
+            </div>
+            <div class="cap-row3">
+              <div class="cap-card">
+                <div class="cap-card-h"><span>ROBINHOOD HOLDINGS</span><span class="mh-s">View All →</span></div>
+                <div class="cap-holds" id="capHolds"></div>
+              </div>
+              <div class="cap-card">
+                <div class="cap-card-h"><span>ASSET ALLOCATION</span></div>
+                <div class="cap-alloc" id="capAlloc"></div>
+              </div>
+            </div>
+          </div>
+          <aside class="cap-rail">
+            <div class="cap-card">
+              <div class="cap-card-h"><span>MONTHLY BILLS</span><button type="button" class="cap-edit">Edit</button></div>
+              <div class="cap-bills" id="capBills"></div>
+              <div class="cap-total">Total Monthly Bills: <b id="capBillTotal">$2,340</b></div>
+            </div>
+            <div class="cap-card">
+              <div class="cap-card-h"><span>SAVINGS GOAL TRACKER</span><button type="button" class="cap-edit">Edit Goal</button></div>
+              <div class="cap-goal-nums">
+                <div><span class="mh-s">Goal</span><b id="capGoal">$25,000</b></div>
+                <div><span class="mh-s">Target / mo</span><b id="capGoalNeed">$2,000</b></div>
+                <div><span class="mh-s">Saved</span><b id="capGoalHave">$7,500</b></div>
+              </div>
+              <div class="cap-bar"><i id="capGoalBar" style="width:30%"></i></div>
+              <div class="mh-s" id="capGoalNote">30% · Behind by $500 · Mar 2028</div>
+              <div class="cap-months" id="capMonths"></div>
+            </div>
+            <div class="cap-card">
+              <div class="cap-card-h"><span>INSIGHTS</span></div>
+              <div class="cap-insights" id="capInsights"></div>
+            </div>
+          </aside>
+        </section>
       </div>
     </div>
   </div>
@@ -414,5 +518,6 @@
   <script src="weather.js"></script>
   <script src="app.js"></script>
   <script src="voice.js"></script>
+  <script src="capital.js"></script>
 </body>
 </html>
