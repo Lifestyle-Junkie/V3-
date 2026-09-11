@@ -1,3 +1,28 @@
+if (typeof startThink !== "function") {
+  window.startThink = function (el) { if (el) el.textContent = "Searching…"; };
+}
+if (typeof stopThink !== "function") {
+  window.stopThink = function () {};
+}
+if (typeof paintBotText !== "function") {
+  window.paintBotText = function (el, text) { if (el) el.textContent = text || ""; };
+}
+if (typeof goToCapitalTab !== "function") {
+  window.goToCapitalTab = function () { if (typeof setView === "function") setView("capital"); };
+}
+if (typeof insertChatMapsCard !== "function") {
+  window.insertChatMapsCard = function () {};
+}
+if (typeof ensureMap !== "function") {
+  window.ensureMap = function () {};
+}
+if (typeof resizeHomeMap !== "function") {
+  window.resizeHomeMap = function () {};
+}
+if (typeof goToWeatherTab !== "function") {
+  window.goToWeatherTab = function () { if (typeof setView === "function") setView("weather"); };
+}
+
 const input = document.getElementById("ask");
 const form = document.getElementById("askForm");
 const thread = document.getElementById("thread");
@@ -30,18 +55,20 @@ const widgetSource = {
 function tickClock() {
   const now = new Date();
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
-  document.getElementById("dateLabel").textContent =
+  const dateEl = document.getElementById("dateLabel");
+  const timeEl = document.getElementById("timeLabel");
+  if (dateEl) dateEl.textContent =
     months[now.getMonth()] + " " + String(now.getDate()).padStart(2,"0") + ", " + now.getFullYear();
   let h = now.getHours();
   const am = h >= 12 ? "PM" : "AM";
   h = h % 12 || 12;
-  document.getElementById("timeLabel").textContent = h + ":" + String(now.getMinutes()).padStart(2, "0") + " " + am;
+  if (timeEl) timeEl.textContent = h + ":" + String(now.getMinutes()).padStart(2, "0") + " " + am;
 }
 tickClock();
 setInterval(tickClock, 1000);
 
-if (collapseBtn) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
-if (histCollapse) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
+if (collapseBtn && layout) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
+if (histCollapse && layout) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
 
 function hideHuds() {
@@ -73,6 +100,7 @@ function coverHome() {
   if (hist) hist.style.setProperty("display", "none", "important");
 }
 function setView(view) {
+  if (!layout) return;
   if (view === "holdings" || view === "stocks") view = "capital";
   layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode", "capital-mode", "home-mode");
   hideHuds();
@@ -86,14 +114,16 @@ function setView(view) {
     layout.classList.add("maps-mode");
     coverHome();
     showHud("mapsHud");
-    setTimeout(ensureMap, 40);
+    if (typeof ensureMap === "function") setTimeout(ensureMap, 40);
   }
   if (view === "weather") {
     layout.classList.add("weather-mode");
     coverHome();
     if (typeof ensureWeatherHud === "function") ensureWeatherHud();
     showHud("weatherHud");
-    if (typeof loadWeather === "function") loadWeather(weatherPlace.lat, weatherPlace.lng, weatherPlace.name);
+    if (typeof loadWeather === "function" && typeof weatherPlace !== "undefined") {
+      loadWeather(weatherPlace.lat, weatherPlace.lng, weatherPlace.name);
+    }
   }
   if (view === "capital") {
     layout.classList.add("capital-mode");
@@ -103,7 +133,7 @@ function setView(view) {
   }
   if (view === "home" || !view) {
     layout.classList.add("home-mode");
-    setTimeout(resizeHomeMap, 50);
+    if (typeof resizeHomeMap === "function") setTimeout(resizeHomeMap, 50);
   }
 }
 function openWidget(name) {
@@ -126,8 +156,10 @@ function openWidget(name) {
     card.innerHTML = '<div class="widget-note">' + name.toUpperCase() + " widget.</div>";
     line.appendChild(card);
   }
-  thread.appendChild(line);
-  thread.scrollTop = thread.scrollHeight;
+  if (thread) {
+    thread.appendChild(line);
+    thread.scrollTop = thread.scrollHeight;
+  }
 }
 document.querySelectorAll(".nav-item").forEach(item => {
   item.addEventListener("click", () => {
@@ -151,6 +183,7 @@ function textFromContent(content) {
   return content.filter(b => b && b.type === "text").map(b => b.text || "").join(" ").trim();
 }
 function showUserShot(dataUrl) {
+  if (!thread) return;
   const line = document.createElement("div");
   line.className = "line me";
   const img = document.createElement("img");
@@ -173,6 +206,7 @@ function renderUserContent(content) {
   addLine("You", content, "me");
 }
 function renderThread() {
+  if (!thread) return;
   thread.innerHTML = "";
   currentTopic().messages.forEach(m => {
     if (m.role === "widget") openWidget(m.content);
@@ -211,9 +245,10 @@ function startTopic() {
   renderAttachRow();
   renderThread();
   renderTopics();
-  input.focus();
+  if (input) input.focus();
 }
 function addLine(who, text, cls) {
+  if (!thread) return null;
   const line = document.createElement("div");
   line.className = "line " + cls;
   const label = document.createElement("div");
@@ -365,7 +400,6 @@ if (dropTarget) {
     if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files);
   });
 }
-
 function artUrl(raw) {
   if (!raw) return "";
   return String(raw)
@@ -433,6 +467,7 @@ async function requestSong(q) {
   return hit;
 }
 function insertChatMusicCard() {
+  if (!thread) return;
   const line = document.createElement("div");
   line.className = "line widget";
   const src = document.querySelector("aside.right .card.music");
@@ -449,7 +484,6 @@ function insertChatMusicCard() {
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
 }
-
 async function sendUserText(text) {
   text = (text || "").trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -463,20 +497,20 @@ async function sendUserText(text) {
   renderAttachRow();
   if (topic.title === "New topic") topic.title = shortTitle(text || "Photo");
   renderTopics();
-  input.value = "";
+  if (input) input.value = "";
   if (!hasFiles && typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
     goToWeatherTab();
     topic.messages.push({ role: "widget", content: "weather" });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   const nearType = !hasFiles && typeof detectNearMe === "function" ? detectNearMe(text) : null;
   if (nearType) {
-    showNearbyCategory(nearType);
+    if (typeof showNearbyCategory === "function") showNearbyCategory(nearType);
     topic.messages.push({ role: "widget", content: "maps" });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   const songQ = !hasFiles && detectPlay(text);
@@ -491,7 +525,7 @@ async function sendUserText(text) {
       if (typeof speakHope === "function") speakHope("Couldn't find that on SoundCloud, sir.");
     }
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   const widgetName = !hasFiles ? detectWidget(text) : null;
@@ -499,31 +533,31 @@ async function sendUserText(text) {
     insertChatMusicCard();
     topic.messages.push({ role: "widget", content: "music" });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   if (widgetName === "maps") {
     insertChatMapsCard();
     topic.messages.push({ role: "widget", content: "maps" });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   if (widgetName === "capital") {
     goToCapitalTab();
     topic.messages.push({ role: "widget", content: "capital" });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
   if (widgetName) {
     openWidget(widgetName);
     topic.messages.push({ role: "widget", content: widgetName });
     busy = false;
-    input.focus();
+    if (input) input.focus();
     return;
   }
-  const waiting = addLine("Hope", "0.0s", "bot");
+  const waiting = addLine("Hope", "Searching…", "bot");
   startThink(waiting);
   try {
     const res = await fetch("/api/chat", {
@@ -544,17 +578,18 @@ async function sendUserText(text) {
     }
   } catch (err) {
     stopThink(waiting);
-    waiting.textContent = "Can't reach backend.";
+    if (waiting) waiting.textContent = "Can't reach backend.";
   }
-  thread.scrollTop = thread.scrollHeight;
+  if (thread) thread.scrollTop = thread.scrollHeight;
   busy = false;
-  input.focus();
+  if (input) input.focus();
 }
-form.addEventListener("submit", async (e) => {
-  e.preventDefault();
-  await sendUserText(input.value);
-});
-
+if (form) {
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    await sendUserText(input ? input.value : "");
+  });
+}
 if (mhPlay) mhPlay.addEventListener("click", () => {
   bootSc();
   if (!scWidget) return;
