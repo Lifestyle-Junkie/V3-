@@ -78,7 +78,10 @@
   opacity: 0.5;
   border-radius: 8px;
 }
-.mh-times, .mh-time { display: none !important; }
+.mh-times, .mh-time, .mh-elapsed, .mh-remain, .mh-clock { display: none !important; }
+.mh-center > div:not(.mh-nowlabel):not(.mh-title):not(.mh-artist):not(.mh-controls):not(.mh-wave) {
+  display: none !important;
+}
 .mh-actions { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
 .mh-actions button {
   background: none; border: 0; color: #c5d8f0; text-align: left;
