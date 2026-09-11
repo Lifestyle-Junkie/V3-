@@ -6,17 +6,27 @@ const collapseBtn = document.getElementById("collapseBtn");
 const histList = document.getElementById("histList");
 const histCollapse = document.getElementById("histCollapse");
 const newTopicBtn = document.getElementById("newTopic");
+const mhPlay = document.getElementById("mhPlay");
+const scFrame = document.getElementById("scPlayer");
+const mhSearchForm = document.getElementById("mhSearchForm");
+const mhSearch = document.getElementById("mhSearch");
+
 let busy = false;
 let topics = [{ id: 1, title: "New topic", messages: [] }];
 let currentId = 1;
 let nextId = 2;
 let pendingFiles = [];
+let musicPlaying = false;
+let scWidget = null;
+let currentSong = { title: "Nothing playing", artist: "Search a song", art: "", url: "" };
+
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
   weather: ".card.weather",
   music: ".card.music"
 };
+
 function tickClock() {
   const now = new Date();
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -29,9 +39,11 @@ function tickClock() {
 }
 tickClock();
 setInterval(tickClock, 1000);
+
 if (collapseBtn) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
 if (histCollapse) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
+
 function hideHuds() {
   ["musicHud", "mapsHud", "weatherHud", "capitalHud"].forEach(id => {
     const el = document.getElementById(id);
@@ -353,6 +365,91 @@ if (dropTarget) {
     if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files);
   });
 }
+
+function artUrl(raw) {
+  if (!raw) return "";
+  return String(raw)
+    .replace("-large.", "-t500x500.")
+    .replace("-badge.", "-t500x500.")
+    .replace("-small.", "-t500x500.")
+    .replace("-tiny.", "-t500x500.");
+}
+function setArt(src) {
+  const url = artUrl(src);
+  ["mhArt", "mhDockArt", "homeMusicArt", "npArt"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el && url) el.src = url;
+  });
+  document.querySelectorAll(".card.music img, .mh-nowmini img, .mh-art").forEach(img => {
+    if (url) img.src = url;
+  });
+}
+function setSongText(title, artist) {
+  const t = title || "Nothing playing";
+  const a = artist || "Search a song";
+  ["mhTitle", "mhDockTitle", "homeMusicTitle", "npTitle"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = t;
+  });
+  ["mhArtist", "mhDockArtist", "homeMusicArtist", "npArtist"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = a;
+  });
+  document.querySelectorAll(".mh-title").forEach(el => { el.textContent = t; });
+  document.querySelectorAll(".mh-artist").forEach(el => { el.textContent = a; });
+}
+function applySong(song) {
+  currentSong = {
+    title: song.title || song.name || "Unknown",
+    artist: song.artist || (song.user && song.user.username) || "SoundCloud",
+    art: artUrl(song.art || song.artwork_url || song.artwork || ""),
+    url: song.url || song.permalink_url || ""
+  };
+  setSongText(currentSong.title, currentSong.artist);
+  if (currentSong.art) setArt(currentSong.art);
+}
+function bootSc() {
+  if (scWidget || !scFrame || !window.SC) return;
+  scWidget = window.SC.Widget(scFrame);
+}
+function loadAndPlay(url) {
+  bootSc();
+  if (!scWidget || !url) return;
+  scWidget.load(url, { auto_play: true });
+  musicPlaying = true;
+}
+function detectPlay(text) {
+  const q = (text || "").trim();
+  const m = q.match(/^(?:play|put on|queue)\s+(.+)$/i);
+  return m ? m[1].trim() : null;
+}
+async function requestSong(q) {
+  const res = await fetch("/api/sc-search?q=" + encodeURIComponent(q));
+  const data = await res.json();
+  const hit = data.track || data.song || (Array.isArray(data.results) && data.results[0]) || data;
+  if (!hit || !(hit.url || hit.permalink_url)) throw new Error("no track");
+  applySong(hit);
+  loadAndPlay(hit.url || hit.permalink_url);
+  return hit;
+}
+function insertChatMusicCard() {
+  const line = document.createElement("div");
+  line.className = "line widget";
+  const src = document.querySelector("aside.right .card.music");
+  if (src) {
+    const card = src.cloneNode(true);
+    const img = card.querySelector("img");
+    if (img && currentSong.art) img.src = currentSong.art;
+    const title = card.querySelector(".title, .mh-t, .np-title");
+    const artist = card.querySelector(".artist, .mh-s, .np-artist");
+    if (title) title.textContent = currentSong.title;
+    if (artist) artist.textContent = currentSong.artist;
+    line.appendChild(card);
+  }
+  thread.appendChild(line);
+  thread.scrollTop = thread.scrollHeight;
+}
+
 async function sendUserText(text) {
   text = (text || "").trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -382,7 +479,7 @@ async function sendUserText(text) {
     input.focus();
     return;
   }
-  const songQ = !hasFiles && typeof detectPlay === "function" ? detectPlay(text) : null;
+  const songQ = !hasFiles && detectPlay(text);
   if (songQ) {
     try {
       await requestSong(songQ);
@@ -457,6 +554,22 @@ form.addEventListener("submit", async (e) => {
   e.preventDefault();
   await sendUserText(input.value);
 });
+
+if (mhPlay) mhPlay.addEventListener("click", () => {
+  bootSc();
+  if (!scWidget) return;
+  if (musicPlaying) { scWidget.pause(); musicPlaying = false; }
+  else { scWidget.play(); musicPlaying = true; }
+});
+if (mhSearchForm) mhSearchForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const q = ((mhSearch && mhSearch.value) || "").trim();
+  if (!q) return;
+  try { await requestSong(q); } catch (err) {}
+});
+if (document.readyState === "complete") bootSc();
+else window.addEventListener("load", bootSc);
+
 const VIEW_ORDER = ["home", "chat", "music", "maps", "weather", "capital"];
 function currentView() {
   const on = document.querySelector(".nav-item.active");
