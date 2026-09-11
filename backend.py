@@ -11,7 +11,6 @@ import urllib.parse
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
@@ -24,19 +23,19 @@ STATIC = {
     "/app.js": ("app.js", "application/javascript; charset=utf-8"),
     "/maps.js": ("maps.js", "application/javascript; charset=utf-8"),
     "/weather.js": ("weather.js", "application/javascript; charset=utf-8"),
+    "/format.js": ("format.js", "application/javascript; charset=utf-8"),
+    "/music.js": ("music.js", "application/javascript; charset=utf-8"),
+    "/voice.js": ("voice.js", "application/javascript; charset=utf-8"),
 }
-
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
 ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
 ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "DAQ2lZdypaQsApLOpVPq").strip()
-
 MODEL = "claude-sonnet-5"
 API_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
-
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
@@ -58,7 +57,6 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
 Always include sir at least once in each reply.
-
 When presenting complex information (pay, hours, commute, stores, jobs, options):
 - Do not put everything in one large table or one wall of text.
 - Use a card-based layout: 3–5 cards. Each card answers one question.
@@ -75,7 +73,6 @@ When presenting complex information (pay, hours, commute, stores, jobs, options)
 - Last card is the takeaway: what the numbers mean in 2–4 lines.
 - Never dump raw pipes with no header row.
 - Do not explain the formatting.
-
 Live facts: answer only from tool text.
 Always end live answers with:
 Sources:
@@ -84,7 +81,6 @@ If tools failed, say that in one line. Do not guess.
 Code or steps: use markdown. Do not dump essays unless asked.
 Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken; the on-screen text can still include sources.
 """
-
 TOOLS = [
     {
         "name": "web_search",
@@ -113,8 +109,6 @@ TOOLS = [
         },
     },
 ]
-
-
 def http_get(url, timeout=20, data=None, headers=None):
     h = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HopeV3/1.0",
@@ -137,8 +131,6 @@ def http_get(url, timeout=20, data=None, headers=None):
     except LookupError:
         text = raw.decode("utf-8", errors="replace")
     return final, text
-
-
 def strip_tags(text):
     text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
     text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
@@ -149,8 +141,6 @@ def strip_tags(text):
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
 def web_search(query):
     q = (query or "").strip()
     if not q:
@@ -197,8 +187,6 @@ def web_search(query):
         lines.append("%d. %s\n   %s" % (i, title, url))
     lines.append("Fetch the best links next.")
     return "\n".join(lines)
-
-
 def web_fetch(url, prompt=""):
     url = (url or "").strip()
     if not url.startswith("http"):
@@ -210,8 +198,6 @@ def web_fetch(url, prompt=""):
     text = strip_tags(page)[:12000]
     note = "Focus: %s\n" % prompt if prompt else ""
     return "%sURL: %s\n\n%s" % (note, final, text or "(no text)")
-
-
 def sc_client_id():
     if _SC_CLIENT["id"] and time.time() - _SC_CLIENT["t"] < 3600:
         return _SC_CLIENT["id"]
@@ -231,8 +217,6 @@ def sc_client_id():
     except Exception:
         pass
     return _SC_CLIENT["id"]
-
-
 def sc_search(query):
     q = (query or "").strip()
     if len(q) < 2:
@@ -290,16 +274,12 @@ def sc_search(query):
         except Exception:
             pass
     return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
-
-
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
     if name == "web_fetch":
         return web_fetch(args.get("url", ""), args.get("prompt", ""))
     return "Unknown tool: %s" % name
-
-
 def claude(messages, system=SYSTEM):
     payload = json.dumps({
         "model": MODEL,
@@ -330,16 +310,12 @@ def claude(messages, system=SYSTEM):
         return None, msg
     except Exception as e:
         return None, str(e)
-
-
 def extract_text(content):
     parts = []
     for block in content or []:
         if isinstance(block, dict) and block.get("type") == "text":
             parts.append(block.get("text") or "")
     return "".join(parts).strip()
-
-
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -368,8 +344,6 @@ def clean_block(b):
             }
         return None
     return None
-
-
 def clean_messages(raw_msgs):
     clean = []
     for m in raw_msgs:
@@ -389,8 +363,6 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
-
-
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -415,8 +387,6 @@ def chat_with_tools(user_messages, extra=""):
             })
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
-
-
 def speak_text(text):
     if not ELEVEN_KEY:
         return None, "ELEVENLABS_API_KEY is not set"
@@ -443,12 +413,9 @@ def speak_text(text):
         return None, err or str(e)
     except Exception as e:
         return None, str(e)
-
-
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
-
     def _json(self, code, obj):
         raw = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -457,7 +424,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(raw)
-
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/config.js":
@@ -500,7 +466,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
-
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
@@ -543,7 +508,6 @@ class Handler(SimpleHTTPRequestHandler):
             pass
         text = chat_with_tools(clean, extra)
         self._json(200, {"text": text, "model": MODEL})
-
     def handle_speak(self):
         if not ELEVEN_KEY:
             self._json(500, {"error": "ELEVENLABS_API_KEY is not set"})
@@ -569,10 +533,12 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(audio)
-
-
 if __name__ == "__main__":
-    for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
+    for name in (
+        "index.html", "style.css", "widgets.css",
+        "app.js", "maps.js", "weather.js",
+        "format.js", "music.js", "voice.js",
+    ):
         if not (DIR / name).exists():
             raise SystemExit("Missing %s next to backend.py" % name)
     print("Hope v3 running at http://%s:%s" % (HOST, PORT))
