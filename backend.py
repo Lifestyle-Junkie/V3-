@@ -26,6 +26,7 @@ STATIC = {
     "/format.js": ("format.js", "application/javascript; charset=utf-8"),
     "/music.js": ("music.js", "application/javascript; charset=utf-8"),
     "/voice.js": ("voice.js", "application/javascript; charset=utf-8"),
+    "/capital.js": ("capital.js", "application/javascript; charset=utf-8"),
 }
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
@@ -537,7 +538,7 @@ if __name__ == "__main__":
     for name in (
         "index.html", "style.css", "widgets.css",
         "app.js", "maps.js", "weather.js",
-        "format.js", "music.js", "voice.js",
+        "format.js", "music.js", "voice.js", "capital.js",
     ):
         if not (DIR / name).exists():
             raise SystemExit("Missing %s next to backend.py" % name)
