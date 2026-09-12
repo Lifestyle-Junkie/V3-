@@ -580,41 +580,42 @@
 .cap-insights {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  max-height: 150px;
+  gap: 8px;
+  max-height: 148px;
   overflow-y: auto;
+  padding-right: 2px;
   scrollbar-width: none;
 }
-.cap-insights::-webkit-scrollbar { width: 0; height: 0; display: none; }
+.cap-insights::-webkit-scrollbar { width: 0; height: 0; background: transparent; }
 .cap-ins {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: 18px 1fr;
   gap: 8px;
   align-items: start;
-  padding: 6px;
-  border-radius: 8px;
+  padding: 0;
   background: transparent;
 }
 .cap-ins-ico {
-  width: 22px;
-  height: 22px;
-  border-radius: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
   display: grid;
   place-items: center;
+  font: 700 11px/1 Inter, sans-serif;
   margin-top: 1px;
 }
 .cap-ins.down .cap-ins-ico {
-  color: #ff4d6d;
-  background: rgba(255,77,109,0.12);
+  color: #fff;
+  background: #e23b55;
 }
 .cap-ins.warn .cap-ins-ico {
-  color: #f0a030;
-  background: rgba(240,160,48,0.14);
+  color: #1a1204;
+  background: #f0b429;
 }
 .cap-ins.tip .cap-ins-ico,
 .cap-ins.up .cap-ins-ico {
-  color: #3ee07a;
-  background: rgba(62,224,122,0.12);
+  color: #fff;
+  background: #3ee07a;
 }
 .cap-ins b {
   display: block;
