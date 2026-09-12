@@ -1,3 +1,13 @@
+const CAP_LOGOS = {
+  AAPL: "https://logo.clearbit.com/apple.com",
+  TSLA: "https://logo.clearbit.com/tesla.com",
+  NVDA: "https://logo.clearbit.com/nvidia.com",
+  MSFT: "https://logo.clearbit.com/microsoft.com",
+  AMZN: "https://logo.clearbit.com/amazon.com",
+  GOOGL: "https://logo.clearbit.com/google.com",
+  GOOG: "https://logo.clearbit.com/google.com"
+};
+
 const CAP_HOLDINGS = [
   { t: "AAPL", name: "Apple", val: 4321.12, chg: 1.24 },
   { t: "TSLA", name: "Tesla", val: 3892.40, chg: 2.91 },
@@ -60,14 +70,27 @@ function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
   box.innerHTML = CAP_HOLDINGS.map(function (h) {
+    const src = CAP_LOGOS[h.t] || "";
     return (
       '<div class="cap-hold">' +
-      "<b>" + h.t + "</b>" +
-      "<span>" + money(h.val) + "</span>" +
+      '<img class="tlogo" alt="" src="' + src + '" />' +
+      '<span class="tk">' + h.t + "</span>" +
+      '<span class="pv">' + money(h.val) + "</span>" +
       '<span class="chg">+' + h.chg.toFixed(2) + "%</span>" +
       "</div>"
     );
   }).join("");
+}
+
+function renderAlloc() {
+  const el = document.getElementById("capAlloc");
+  if (!el) return;
+  el.innerHTML =
+    "<div class='cap-alloc-pie'><div class='cap-alloc-center'><b>$18,420</b><span>Total</span></div></div>" +
+    "<div class='cap-alloc-leg'>" +
+      "<div><i class='rh'></i>Robinhood 86%<b>$15,920.32</b></div>" +
+      "<div><i class='cash'></i>Cash 14%<b>$2,500.00</b></div>" +
+    "</div>";
 }
 
 function renderBills() {
@@ -119,10 +142,10 @@ function renderInsights() {
 function bootCapital() {
   drawCapChart();
   renderHolds();
+  renderAlloc();
   renderBills();
   renderMonths();
   renderInsights();
-
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll("[data-cap-tab]").forEach(function (b) {
@@ -131,7 +154,6 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
-
   document.querySelectorAll(".cap-ranges button").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll(".cap-ranges button").forEach(function (b) {
@@ -140,7 +162,6 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
-
   const cash = document.getElementById("capCashEdit");
   if (cash) {
     cash.addEventListener("click", function () {
