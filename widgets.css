@@ -459,25 +459,31 @@
   color: #3ee07a;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  min-width: 120px;
+  min-width: 168px;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
 }
 .cap-spark { display: inline-flex; }
+.cap-spark .candle-wrapper {
+  display: flex;
+  justify-content: center;
+  padding: 0;
+  background: transparent;
+}
 .cap-spark .candle-chart {
   display: flex;
   align-items: flex-end;
-  height: 18px;
-  gap: 1px;
+  height: 28px;
+  gap: 2px;
 }
 .cap-spark .candle {
-  width: 2px;
-  height: 18px;
+  width: 3px;
+  height: 110%;
   position: relative;
-  animation: none;
-  filter: none;
+  animation: capFade 2.6s infinite ease-in-out;
+  filter: drop-shadow(0 0 2.7px #3ee07a);
 }
 .cap-spark .candle::after {
   content: "";
@@ -485,32 +491,45 @@
   left: 0;
   width: 100%;
   background: #3ee07a;
-  border: 0;
+  border: 1px solid #3ee07a;
   bottom: var(--b);
   height: var(--h);
 }
 .cap-spark .candle::before {
   content: "";
   position: absolute;
-  left: 50%;
+  left: 63%;
   transform: translateX(-50%);
   width: 1px;
   background: #3ee07a;
   bottom: var(--wb);
   height: var(--wh);
 }
-.cap-spark .candle:nth-child(1)  { --b: 20%; --h: 30%; --wb: 12%; --wh: 50%; }
-.cap-spark .candle:nth-child(2)  { --b: 28%; --h: 18%; --wb: 18%; --wh: 40%; }
-.cap-spark .candle:nth-child(3)  { --b: 22%; --h: 35%; --wb: 14%; --wh: 52%; }
-.cap-spark .candle:nth-child(4)  { --b: 30%; --h: 22%; --wb: 22%; --wh: 42%; }
-.cap-spark .candle:nth-child(5)  { --b: 18%; --h: 40%; --wb: 10%; --wh: 58%; }
-.cap-spark .candle:nth-child(6)  { --b: 26%; --h: 28%; --wb: 16%; --wh: 48%; }
-.cap-spark .candle:nth-child(7)  { --b: 14%; --h: 46%; --wb: 8%;  --wh: 62%; }
-.cap-spark .candle:nth-child(8)  { --b: 24%; --h: 32%; --wb: 16%; --wh: 50%; }
-.cap-spark .candle:nth-child(9)  { --b: 20%; --h: 38%; --wb: 12%; --wh: 56%; }
-.cap-spark .candle:nth-child(10) { --b: 16%; --h: 44%; --wb: 10%; --wh: 60%; }
-.cap-spark .candle:nth-child(11) { --b: 22%; --h: 36%; --wb: 14%; --wh: 54%; }
-.cap-spark .candle:nth-child(12) { --b: 12%; --h: 50%; --wb: 8%;  --wh: 66%; }
+.cap-spark .candle:nth-child(1)  { --b: 7.1%;  --h: 18.93%; --wb: 0%;    --wh: 31.95%; animation-delay: 0s; }
+.cap-spark .candle:nth-child(2)  { --b: 26.04%; --h: 2.37%;  --wb: 19.41%; --wh: 14.91%; animation-delay: 0.065s; }
+.cap-spark .candle:nth-child(3)  { --b: 28.64%; --h: 4.5%;   --wb: 16.92%; --wh: 21.66%; animation-delay: 0.13s; }
+.cap-spark .candle:nth-child(4)  { --b: 31.42%; --h: 3.43%;  --wb: 19.76%; --wh: 27.93%; animation-delay: 0.195s; }
+.cap-spark .candle:nth-child(5)  { --b: 31.42%; --h: 15.44%; --wb: 27.43%; --wh: 28.07%; animation-delay: 0.26s; }
+.cap-spark .candle:nth-child(6)  { --b: 46.54%; --h: 0.28%;  --wb: 43.43%; --wh: 24.38%; animation-delay: 0.325s; }
+.cap-spark .candle:nth-child(7)  { --b: 35.86%; --h: 8.7%;   --wb: 29.7%;  --wh: 24.5%;  animation-delay: 0.39s; }
+.cap-spark .candle:nth-child(8)  { --b: 11.67%; --h: 24.19%; --wb: 5.33%;  --wh: 31.83%; animation-delay: 0.455s; }
+.cap-spark .candle:nth-child(9)  { --b: 11.83%; --h: 15.1%;  --wb: 7.93%;  --wh: 24.97%; animation-delay: 0.52s; }
+.cap-spark .candle:nth-child(10) { --b: 27.81%; --h: 12.04%; --wb: 27.69%; --wh: 28.17%; animation-delay: 0.585s; }
+.cap-spark .candle:nth-child(11) { --b: 39.85%; --h: 28.25%; --wb: 39.53%; --wh: 28.58%; animation-delay: 0.65s; }
+.cap-spark .candle:nth-child(12) { --b: 70.8%;  --h: 6.27%;  --wb: 60.96%; --wh: 24.84%; animation-delay: 0.715s; }
+.cap-spark .candle:nth-child(13) { --b: 75.8%;  --h: 2.71%;  --wb: 68.38%; --wh: 31.62%; animation-delay: 0.78s; }
+.cap-spark .candle:nth-child(14) { --b: 67.23%; --h: 8.71%;  --wb: 64.8%;  --wh: 24.97%; animation-delay: 0.845s; }
+.cap-spark .candle:nth-child(15) { --b: 67.81%; --h: 7.85%;  --wb: 57.54%; --wh: 27.55%; animation-delay: 0.91s; }
+.cap-spark .candle:nth-child(16) { --b: 70.08%; --h: 6.14%;  --wb: 55.68%; --wh: 21.83%; animation-delay: 0.975s; }
+.cap-spark .candle:nth-child(17) { --b: 66.39%; --h: 3.69%;  --wb: 58.11%; --wh: 26.11%; animation-delay: 1.04s; }
+.cap-spark .candle:nth-child(18) { --b: 64.8%;  --h: 9.78%;  --wb: 45.47%; --wh: 29.61%; animation-delay: 1.105s; }
+@keyframes capFade {
+  0%   { opacity: 0; transform: scaleY(0); }
+  10%  { opacity: 1; transform: scaleY(1.5); }
+  50%  { opacity: 1; transform: scaleY(1.35); }
+  70%  { opacity: 0; transform: scaleY(1.5); }
+  100% { opacity: 0; transform: scaleY(0); }
+}
 .cap-alloc {
   display: flex;
   align-items: center;
