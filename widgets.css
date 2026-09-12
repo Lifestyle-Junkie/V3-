@@ -407,17 +407,74 @@
   border-radius: 16px; padding: 14px; backdrop-filter: blur(16px);
 }
 .cap-card-h { display: flex; justify-content: space-between; align-items: center; font-size: 11px; letter-spacing: 0.14em; color: #9bb6d4; margin-bottom: 10px; }
-.cap-src { display: flex; justify-content: space-between; align-items: flex-start; }
+.cap-src { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.cap-src-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.rh-mark {
+  width: 28px; height: 28px; border-radius: 8px;
+  display: grid; place-items: center; flex: 0 0 28px;
+  background: rgba(0,200,5,0.12);
+  border: 1px solid rgba(0,200,5,0.35);
+}
+.rh-mark svg { width: 16px; height: 16px; }
 .cap-pill { font-size: 10px; padding: 4px 8px; border-radius: 999px; border: 1px solid rgba(62,224,122,0.35); color: #3ee07a; }
 .cap-edit {
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
   border-radius: 8px; padding: 4px 8px; font: 600 10px Inter, sans-serif; cursor: pointer;
 }
-.cap-holds { display: flex; flex-direction: column; gap: 6px; }
-.cap-hold { display: grid; grid-template-columns: 28px 1fr auto auto; gap: 8px; align-items: center; font-size: 12px; }
-.cap-hold img { width: 22px; height: 22px; border-radius: 6px; }
-.cap-hold .chg { color: #3ee07a; }
-.cap-alloc { min-height: 140px; }
+.cap-holds { display: flex; flex-direction: column; gap: 2px; }
+.cap-hold {
+  display: grid;
+  grid-template-columns: 26px 52px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 2px;
+  font-size: 12px;
+}
+.cap-hold img, .cap-hold .tlogo {
+  width: 22px; height: 22px; border-radius: 6px; object-fit: cover; background: #101828;
+}
+.cap-hold .tk { font-weight: 700; letter-spacing: 0.04em; }
+.cap-hold .pv { color: #c5d8f0; font-variant-numeric: tabular-nums; text-align: right; }
+.cap-hold .chg { color: #3ee07a; font-variant-numeric: tabular-nums; text-align: right; min-width: 58px; }
+.cap-alloc {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 132px;
+}
+.cap-alloc-pie {
+  position: relative;
+  width: 112px; height: 112px; flex: 0 0 112px;
+  border-radius: 50%;
+  background: conic-gradient(#3ee07a 0 86%, #3b82f6 86% 100%);
+}
+.cap-alloc-pie::after {
+  content: "";
+  position: absolute;
+  inset: 24px;
+  border-radius: 50%;
+  background: #0b1220;
+}
+.cap-alloc-center {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+.cap-alloc-center b { font-size: 14px; font-weight: 600; line-height: 1.1; }
+.cap-alloc-center span { font-size: 10px; color: #8aa0bf; margin-top: 2px; }
+.cap-alloc-leg { display: flex; flex-direction: column; gap: 10px; font-size: 12px; color: #c5d8f0; }
+.cap-alloc-leg i {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 8px;
+}
+.cap-alloc-leg i.rh { background: #3ee07a; }
+.cap-alloc-leg i.cash { background: #3b82f6; }
+.cap-alloc-leg b { display: block; color: #e8f1ff; margin-top: 2px; font-weight: 600; }
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
 .cap-bills { font-size: 12px; display: flex; flex-direction: column; }
@@ -485,7 +542,26 @@
   color: #c5d8f0;
 }
 .cap-total b { color: #e8f1ff; }
-.cap-goal-nums { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+.cap-goal-nums {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.cap-goal-nums > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cap-goal-nums .mh-s {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.cap-goal-nums b {
+  display: block;
+  font-size: 16px;
+  line-height: 1.15;
+  white-space: nowrap;
+}
 .cap-bar { height: 8px; border-radius: 8px; background: rgba(120,180,255,0.12); overflow: hidden; }
 .cap-bar i { display: block; height: 100%; background: linear-gradient(90deg, #3ee07a, #7ecbff); }
 .cap-months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 10px; }
