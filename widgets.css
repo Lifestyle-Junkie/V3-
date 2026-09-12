@@ -392,10 +392,41 @@
 .cap-chart { grid-column: 1; height: 140px; margin-top: 8px; }
 .cap-donut-mini { grid-column: 2; grid-row: 1 / span 3; }
 .cap-pie {
-  width: 120px; height: 120px; margin: 10px auto; border-radius: 50%;
+  position: relative;
+  width: 120px;
+  height: 120px;
+  margin: 10px auto;
+  border-radius: 50%;
   background: conic-gradient(#3ee07a 0 86%, #3b82f6 86% 100%);
-  mask: radial-gradient(circle, transparent 48%, #000 49%);
-  -webkit-mask: radial-gradient(circle, transparent 48%, #000 49%);
+}
+.cap-pie::after {
+  content: "";
+  position: absolute;
+  inset: 28px;
+  border-radius: 50%;
+  background: #0b1220;
+}
+.cap-pie-center {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  pointer-events: none;
+}
+.cap-pie-center b {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.15;
+  color: #e8f1ff;
+}
+.cap-pie-center span {
+  font-size: 9px;
+  color: #8aa0bf;
+  margin-top: 2px;
 }
 .cap-legend { font-size: 11px; color: #c5d8f0; display: flex; flex-direction: column; gap: 6px; }
 .cap-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
@@ -595,22 +626,23 @@ img.rh-mark {
 .cap-alloc-leg b { display: block; color: #e8f1ff; margin-top: 2px; font-weight: 600; }
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
-.cap-bills { font-size: 12px; display: flex; flex-direction: column; }
+.cap-bills { font-size: 11px; display: flex; flex-direction: column; min-width: 0; }
 .cap-bill-h,
 .cap-bill {
   display: grid;
-  grid-template-columns: minmax(88px, 1.3fr) 70px 52px 82px 64px;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1.15fr) 58px 36px 58px 48px;
+  gap: 4px;
   align-items: center;
-  padding: 8px 0;
+  padding: 7px 0;
+  min-width: 0;
 }
 .cap-bill-h {
   color: #8aa0bf;
-  font-size: 9px;
-  letter-spacing: 0.12em;
+  font-size: 8px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   border-bottom: 1px solid rgba(120,180,255,0.16);
-  padding-bottom: 8px;
+  padding-bottom: 7px;
   margin-bottom: 2px;
 }
 .cap-bill { border-bottom: 1px solid rgba(120,180,255,0.08); }
@@ -620,32 +652,35 @@ img.rh-mark {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  min-width: 0;
 }
 .cap-bill > :nth-child(2) {
   font-variant-numeric: tabular-nums;
   color: #d4e8ff;
+  font-size: 11px;
 }
-.cap-bill > :nth-child(3) { font-size: 11px; color: #8aa0bf; }
+.cap-bill > :nth-child(3) { font-size: 10px; color: #8aa0bf; }
 .cap-bill > :nth-child(4) {
   justify-self: start;
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
   color: #7ecbff;
   border: 1px solid rgba(126,203,255,0.35);
-  border-radius: 8px;
-  padding: 3px 7px;
+  border-radius: 7px;
+  padding: 2px 5px;
   white-space: nowrap;
 }
 .cap-bill .st,
 .cap-bill > :nth-child(5) {
   justify-self: start;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
   padding: 0;
   min-width: 0;
   background: none !important;
   border-radius: 0;
+  white-space: nowrap;
 }
 .cap-bill .st.paid { color: #3ee07a; }
 .cap-bill .st.pend { color: #f0c36a; }
@@ -665,19 +700,24 @@ img.rh-mark {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 8px;
+  align-items: end;
 }
-.cap-goal-nums > div { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.cap-goal-nums > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cap-goal-nums .mh-s {
   display: block;
   font-size: 9px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
+  line-height: 1;
+  margin: 0;
 }
 .cap-goal-nums b {
   display: block;
-  font-size: 16px;
-  line-height: 1.15;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.1;
+  margin: 0;
   white-space: nowrap;
 }
 .cap-bar { height: 8px; border-radius: 8px; background: rgba(120,180,255,0.12); overflow: hidden; }
