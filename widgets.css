@@ -423,12 +423,22 @@
   display: grid;
   place-items: center;
   flex: 0 0 40px;
-  background: #07140c;
+  background: #fff;
   border: 1px solid rgba(0,200,5,0.35);
   box-shadow: 0 0 16px rgba(0,200,5,0.12);
+  object-fit: contain;
+  padding: 4px;
 }
 .rh-mark svg,
 .cap-rh-ico svg { width: 22px; height: 22px; display: block; }
+img.cap-rh-ico,
+img.rh-mark {
+  display: block;
+  width: 40px;
+  height: 40px;
+  padding: 4px;
+  background: #fff;
+}
 .cap-pill { font-size: 9px; padding: 3px 7px; border-radius: 999px; border: 1px solid rgba(62,224,122,0.35); color: #3ee07a; }
 .cap-edit {
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
