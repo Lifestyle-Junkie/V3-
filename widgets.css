@@ -421,19 +421,25 @@
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
 .cap-bills { font-size: 12px; display: flex; flex-direction: column; }
+.cap-bill-h,
 .cap-bill {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
-  column-gap: 12px;
-  row-gap: 3px;
-  padding: 11px 2px;
-  border-bottom: 1px solid rgba(120,180,255,0.1);
+  grid-template-columns: minmax(88px, 1.3fr) 70px 52px 82px 64px;
+  gap: 8px;
   align-items: center;
+  padding: 8px 0;
 }
+.cap-bill-h {
+  color: #8aa0bf;
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-bottom: 1px solid rgba(120,180,255,0.16);
+  padding-bottom: 8px;
+  margin-bottom: 2px;
+}
+.cap-bill { border-bottom: 1px solid rgba(120,180,255,0.08); }
 .cap-bill > :nth-child(1) {
-  grid-column: 1;
-  grid-row: 1;
   font-weight: 600;
   color: #e8f1ff;
   white-space: nowrap;
@@ -441,42 +447,40 @@
   text-overflow: ellipsis;
 }
 .cap-bill > :nth-child(2) {
-  grid-column: 2;
-  grid-row: 1;
-  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: #d4e8ff;
-  text-align: right;
 }
-.cap-bill > :nth-child(3),
+.cap-bill > :nth-child(3) { font-size: 11px; color: #8aa0bf; }
 .cap-bill > :nth-child(4) {
-  grid-row: 2;
-  grid-column: 1;
-  font-size: 11px;
-  color: #8aa0bf;
-}
-.cap-bill > :nth-child(4) { margin-left: 6.5em; }
-.cap-bill .st,
-.cap-bill > :nth-child(5) {
-  grid-column: 2;
-  grid-row: 1 / span 2;
-  justify-self: end;
-  align-self: center;
-  font-size: 10px;
+  justify-self: start;
+  font-size: 9px;
   font-weight: 600;
   letter-spacing: 0.04em;
-  padding: 3px 8px;
-  border-radius: 999px;
-  min-width: 64px;
-  text-align: center;
+  color: #7ecbff;
+  border: 1px solid rgba(126,203,255,0.35);
+  border-radius: 8px;
+  padding: 3px 7px;
+  white-space: nowrap;
 }
-.cap-bill .st.paid { color: #3ee07a; background: rgba(62,224,122,0.12); }
-.cap-bill .st.pend { color: #f0c36a; background: rgba(240,195,106,0.12); }
-.cap-bill .st.over { color: #ff4d6d; background: rgba(255,77,109,0.12); }
+.cap-bill .st,
+.cap-bill > :nth-child(5) {
+  justify-self: start;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0;
+  min-width: 0;
+  background: none !important;
+  border-radius: 0;
+}
+.cap-bill .st.paid { color: #3ee07a; }
+.cap-bill .st.pend { color: #f0c36a; }
+.cap-bill .st.over { color: #ff4d6d; }
 .cap-total {
   margin-top: 12px;
-  padding-top: 8px;
-  text-align: right;
+  padding-top: 10px;
+  border-top: 1px solid rgba(120,180,255,0.12);
+  display: flex;
+  justify-content: space-between;
   font-size: 13px;
   color: #c5d8f0;
 }
