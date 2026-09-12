@@ -72,8 +72,8 @@ function renderHolds() {
   if (!box) return;
   box.innerHTML =
     '<div class="cap-hold cap-hold-h">' +
-      "<span></span><span>Ticker</span><span>Price</span>" +
-      '<span class="chg-h">Change<button type="button" class="cap-1d">1D</button></span>' +
+      "<span></span><span>Ticker</span><span>Price</span><span>Change</span>" +
+      '<span class="chg-h"><button type="button" class="cap-1d">1D</button></span>' +
     "</div>" +
     CAP_HOLDINGS.map(function (h) {
       const src = CAP_LOGOS[h.t] || "";
@@ -82,7 +82,8 @@ function renderHolds() {
         '<img class="tlogo" alt="' + h.t + '" src="' + src + '" />' +
         '<span class="tk">' + h.t + "</span>" +
         '<span class="pv">' + money(h.val) + "</span>" +
-        '<span class="chg">+' + h.chg.toFixed(2) + "% " + sparkHtml() + "</span>" +
+        '<span class="chg">+' + h.chg.toFixed(2) + "%</span>" +
+        sparkHtml() +
         "</div>"
       );
     }).join("");
