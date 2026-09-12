@@ -36,6 +36,7 @@ const CAP_MONTHS = [
   { m: "Sep", v: 1500, ok: false }
 ];
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
+const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -137,7 +138,7 @@ function renderInsights() {
     { tone: "warn", title: "Gym charge posts in 3 days", note: "Recurring $30 draft is coming up." }
   ];
   box.innerHTML = rows.map(function (r) {
-    const mark = r.tone === "warn" ? WARN_ICO : "↓";
+    const mark = r.tone === "warn" ? WARN_ICO : DOWN_ICO;
     return (
       '<div class="cap-ins ' + r.tone + '">' +
         '<span class="cap-ins-ico">' + mark + "</span>" +
