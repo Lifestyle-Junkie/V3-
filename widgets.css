@@ -605,8 +605,18 @@
   margin-top: 1px;
 }
 .cap-ins.down .cap-ins-ico {
-  color: #fff;
-  background: #e23b55;
+  background: transparent;
+  color: #e23b55;
+  width: 16px;
+  height: 16px;
+}
+.cap-ins.down .cap-ins-ico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: #e23b55;
+  transform: rotate(90deg);
+  transition: none;
 }
 .cap-ins.warn .cap-ins-ico {
   background: transparent;
