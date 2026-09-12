@@ -420,16 +420,67 @@
 .cap-alloc { min-height: 140px; }
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
-.cap-bills { font-size: 12px; }
+.cap-bills { font-size: 12px; display: flex; flex-direction: column; }
 .cap-bill {
-  display: grid; grid-template-columns: 1fr 64px 58px 70px 54px; gap: 6px;
-  align-items: center; padding: 6px 0; border-bottom: 1px solid rgba(120,180,255,0.08);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  row-gap: 3px;
+  padding: 11px 2px;
+  border-bottom: 1px solid rgba(120,180,255,0.1);
+  align-items: center;
 }
-.cap-bill .st { font-size: 10px; }
-.cap-bill .st.paid { color: #3ee07a; }
-.cap-bill .st.pend { color: #f0c36a; }
-.cap-bill .st.over { color: #ff4d6d; }
-.cap-total { margin-top: 10px; text-align: right; font-size: 13px; }
+.cap-bill > :nth-child(1) {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 600;
+  color: #e8f1ff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cap-bill > :nth-child(2) {
+  grid-column: 2;
+  grid-row: 1;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #d4e8ff;
+  text-align: right;
+}
+.cap-bill > :nth-child(3),
+.cap-bill > :nth-child(4) {
+  grid-row: 2;
+  grid-column: 1;
+  font-size: 11px;
+  color: #8aa0bf;
+}
+.cap-bill > :nth-child(4) { margin-left: 6.5em; }
+.cap-bill .st,
+.cap-bill > :nth-child(5) {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  justify-self: end;
+  align-self: center;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  min-width: 64px;
+  text-align: center;
+}
+.cap-bill .st.paid { color: #3ee07a; background: rgba(62,224,122,0.12); }
+.cap-bill .st.pend { color: #f0c36a; background: rgba(240,195,106,0.12); }
+.cap-bill .st.over { color: #ff4d6d; background: rgba(255,77,109,0.12); }
+.cap-total {
+  margin-top: 12px;
+  padding-top: 8px;
+  text-align: right;
+  font-size: 13px;
+  color: #c5d8f0;
+}
+.cap-total b { color: #e8f1ff; }
 .cap-goal-nums { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
 .cap-bar { height: 8px; border-radius: 8px; background: rgba(120,180,255,0.12); overflow: hidden; }
 .cap-bar i { display: block; height: 100%; background: linear-gradient(90deg, #3ee07a, #7ecbff); }
