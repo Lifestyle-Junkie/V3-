@@ -7,7 +7,6 @@ const CAP_LOGOS = {
   GOOGL: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
   GOOG: "https://www.google.com/s2/favicons?sz=64&domain=google.com"
 };
-
 const CAP_HOLDINGS = [
   { t: "AAPL", name: "Apple", val: 4321.12, chg: 1.24 },
   { t: "TSLA", name: "Tesla", val: 3892.40, chg: 2.91 },
@@ -16,7 +15,6 @@ const CAP_HOLDINGS = [
   { t: "AMZN", name: "Amazon", val: 1882.34, chg: 1.12 },
   { t: "GOOGL", name: "Alphabet", val: 1135.21, chg: 1.56 }
 ];
-
 const CAP_BILLS = [
   { name: "Rent", amt: 1450, due: "Sep 1", via: "Zelle - Mom", type: "Recurring", st: "paid" },
   { name: "Car Insurance", amt: 210, due: "Sep 15", via: "Card", type: "Recurring", st: "pend" },
@@ -29,7 +27,6 @@ const CAP_BILLS = [
   { name: "Software (One-Time)", amt: 120, due: "Sep 18", via: "Card", type: "One-Time", st: "paid" },
   { name: "Travel (Hotel)", amt: 350, due: "Sep 30", via: "Card", type: "One-Time", st: "pend" }
 ];
-
 const CAP_MONTHS = [
   { m: "Apr", v: 2000, ok: true },
   { m: "May", v: 2200, ok: true },
@@ -38,11 +35,10 @@ const CAP_MONTHS = [
   { m: "Aug", v: 1500, ok: false },
   { m: "Sep", v: 1500, ok: false }
 ];
-
+const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
-
 function drawCapChart() {
   const el = document.getElementById("capChart");
   if (!el) return;
@@ -65,7 +61,6 @@ function drawCapChart() {
     '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
     "</svg>";
 }
-
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
@@ -89,7 +84,6 @@ function renderHolds() {
     });
   });
 }
-
 function renderAlloc() {
   const el = document.getElementById("capAlloc");
   if (!el) return;
@@ -100,7 +94,6 @@ function renderAlloc() {
       "<div><i class='cash'></i>Cash 14%<b>$2,500.00</b></div>" +
     "</div>";
 }
-
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
@@ -121,7 +114,6 @@ function renderBills() {
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
 }
-
 function renderMonths() {
   const box = document.getElementById("capMonths");
   if (!box) return;
@@ -134,7 +126,6 @@ function renderMonths() {
     );
   }).join("");
 }
-
 function renderInsights() {
   const box = document.getElementById("capInsights");
   if (!box) return;
@@ -146,7 +137,7 @@ function renderInsights() {
     { tone: "warn", title: "Gym charge posts in 3 days", note: "Recurring $30 draft is coming up." }
   ];
   box.innerHTML = rows.map(function (r) {
-    const mark = r.tone === "warn" ? "!" : "↓";
+    const mark = r.tone === "warn" ? WARN_ICO : "↓";
     return (
       '<div class="cap-ins ' + r.tone + '">' +
         '<span class="cap-ins-ico">' + mark + "</span>" +
@@ -155,7 +146,6 @@ function renderInsights() {
     );
   }).join("");
 }
-
 function bootCapital() {
   drawCapChart();
   renderHolds();
@@ -191,7 +181,6 @@ function bootCapital() {
     });
   }
 }
-
 function goToCapitalTab() {
   document.querySelectorAll(".nav-item").forEach(function (i) {
     i.classList.remove("active");
@@ -204,7 +193,6 @@ function goToCapitalTab() {
     layout.classList.add("capital-mode");
   }
 }
-
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", bootCapital);
 } else {
