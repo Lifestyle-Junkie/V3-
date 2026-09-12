@@ -62,11 +62,16 @@ function drawCapChart() {
     '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
     "</svg>";
 }
+function sparkHtml() {
+  var n = 12, html = '<span class="cap-spark"><span class="candle-chart">';
+  for (var i = 0; i < n; i++) html += '<span class="candle"></span>';
+  return html + "</span></span>";
+}
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
   box.innerHTML =
-    '<div class="cap-hold cap-hold-h"><span></span><span>Ticker</span><span>Price</span><span>Change</span></div>' +
+    '<div class="cap-hold cap-hold-h"><span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span></div>' +
     CAP_HOLDINGS.map(function (h) {
       const src = CAP_LOGOS[h.t] || "";
       return (
@@ -75,6 +80,7 @@ function renderHolds() {
         '<span class="tk">' + h.t + "</span>" +
         '<span class="pv">' + money(h.val) + "</span>" +
         '<span class="chg">+' + h.chg.toFixed(2) + "%</span>" +
+        sparkHtml() +
         "</div>"
       );
     }).join("");
