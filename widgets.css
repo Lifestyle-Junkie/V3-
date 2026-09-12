@@ -415,13 +415,20 @@
 .cap-card-h { display: flex; justify-content: space-between; align-items: center; font-size: 10px; letter-spacing: 0.14em; color: #9bb6d4; margin-bottom: 6px; }
 .cap-src { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .cap-src-l { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.rh-mark {
-  width: 24px; height: 24px; border-radius: 7px;
-  display: grid; place-items: center; flex: 0 0 24px;
-  background: rgba(0,200,5,0.12);
+.rh-mark,
+.cap-rh-ico {
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 40px;
+  background: #07140c;
   border: 1px solid rgba(0,200,5,0.35);
+  box-shadow: 0 0 16px rgba(0,200,5,0.12);
 }
-.rh-mark svg { width: 14px; height: 14px; }
+.rh-mark svg,
+.cap-rh-ico svg { width: 22px; height: 22px; display: block; }
 .cap-pill { font-size: 9px; padding: 3px 7px; border-radius: 999px; border: 1px solid rgba(62,224,122,0.35); color: #3ee07a; }
 .cap-edit {
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
