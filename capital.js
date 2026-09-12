@@ -139,11 +139,9 @@ function renderInsights() {
   const box = document.getElementById("capInsights");
   if (!box) return;
   const icoDown =
-    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
   const icoWarn =
-    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 9v5"/><path d="M12 17h.01"/><path d="M10.3 4.7L2.4 18.2A2 2 0 0 0 4.1 21h15.8a2 2 0 0 0 1.7-2.8L13.7 4.7a2 2 0 0 0-3.4 0z"/></svg>';
-  const icoBulb =
-    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 1 4 10c-.7.7-1 1.5-1 2.4V16H9v-.6c0-.9-.3-1.7-1-2.4A6 6 0 0 1 12 3z"/></svg>';
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>';
   const rows = [
     {
       tone: "down",
@@ -152,14 +150,14 @@ function renderInsights() {
       note: "Your car insurance payment is higher than last month."
     },
     {
-      tone: "warn",
-      ico: icoWarn,
+      tone: "down",
+      ico: icoDown,
       title: "Robinhood portfolio dipped −$200",
       note: "Mainly due to market dip in tech stocks."
     },
     {
-      tone: "tip",
-      ico: icoBulb,
+      tone: "warn",
+      ico: icoWarn,
       title: "Cash withdrawals higher than usual (−$150)",
       note: "More cash spent this month compared to average."
     }
