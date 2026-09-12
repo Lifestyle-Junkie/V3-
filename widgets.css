@@ -421,13 +421,13 @@
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
   border-radius: 8px; padding: 4px 8px; font: 600 10px Inter, sans-serif; cursor: pointer;
 }
-.cap-holds { display: flex; flex-direction: column; gap: 2px; }
+.cap-holds { display: flex; flex-direction: column; gap: 0; }
 .cap-hold {
   display: grid;
-  grid-template-columns: 26px 52px 1fr auto;
-  gap: 8px;
+  grid-template-columns: 22px 52px 92px minmax(150px, 1fr);
+  gap: 6px;
   align-items: center;
-  padding: 7px 2px;
+  padding: 6px 0;
   font-size: 12px;
 }
 .cap-hold-h {
@@ -436,7 +436,7 @@
   letter-spacing: 0.12em;
   text-transform: uppercase;
   border-bottom: 1px solid rgba(120,180,255,0.16);
-  padding-bottom: 8px;
+  padding-bottom: 6px;
   margin-bottom: 2px;
 }
 .cap-hold-h span { font-weight: 600; color: #8aa0bf; }
@@ -454,16 +454,36 @@
   font: 700 10px Inter, sans-serif;
 }
 .cap-hold .tk { font-weight: 700; letter-spacing: 0.04em; }
-.cap-hold .pv { color: #c5d8f0; font-variant-numeric: tabular-nums; text-align: right; }
+.cap-hold .pv {
+  color: #c5d8f0;
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+}
 .cap-hold .chg {
   color: #3ee07a;
   font-variant-numeric: tabular-nums;
-  text-align: right;
-  min-width: 168px;
+  min-width: 0;
   display: inline-flex;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+.chg-h {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.cap-1d {
+  height: 18px;
+  padding: 0 7px;
+  border-radius: 6px;
+  border: 1px solid rgba(62,224,122,0.4);
+  background: rgba(62,224,122,0.12);
+  color: #3ee07a;
+  font: 700 9px Inter, sans-serif;
+  letter-spacing: 0.08em;
+  cursor: pointer;
 }
 .cap-spark { display: inline-flex; }
 .cap-spark .candle-wrapper {
