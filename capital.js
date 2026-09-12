@@ -138,34 +138,18 @@ function renderMonths() {
 function renderInsights() {
   const box = document.getElementById("capInsights");
   if (!box) return;
-  const icoDown =
-    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M6 13l6 6 6-6"/></svg>';
-  const icoWarn =
-    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/><path d="M12 8v5"/><path d="M12 16h.01"/></svg>';
   const rows = [
-    {
-      tone: "down",
-      ico: icoDown,
-      title: "Insurance bill increased +$120 this month",
-      note: "Your car insurance payment is higher than last month."
-    },
-    {
-      tone: "down",
-      ico: icoDown,
-      title: "Robinhood portfolio dipped −$200",
-      note: "Mainly due to market dip in tech stocks."
-    },
-    {
-      tone: "warn",
-      ico: icoWarn,
-      title: "Cash withdrawals higher than usual (−$150)",
-      note: "More cash spent this month compared to average."
-    }
+    { tone: "down", title: "Insurance bill increased +$120 this month", note: "Your car insurance payment is higher than last month." },
+    { tone: "down", title: "Robinhood portfolio dipped −$200", note: "Mainly due to market dip in tech stocks." },
+    { tone: "warn", title: "Cash withdrawals higher than usual (−$150)", note: "More cash spent this month compared to average." },
+    { tone: "down", title: "Water bill marked overdue", note: "Sep 22 payment has not cleared yet." },
+    { tone: "warn", title: "Gym charge posts in 3 days", note: "Recurring $30 draft is coming up." }
   ];
   box.innerHTML = rows.map(function (r) {
+    const mark = r.tone === "warn" ? "!" : "↓";
     return (
       '<div class="cap-ins ' + r.tone + '">' +
-        '<span class="cap-ins-ico">' + r.ico + "</span>" +
+        '<span class="cap-ins-ico">' + mark + "</span>" +
         "<div><b>" + r.title + "</b><span>" + r.note + "</span></div>" +
       "</div>"
     );
