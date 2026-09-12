@@ -609,8 +609,18 @@
   background: #e23b55;
 }
 .cap-ins.warn .cap-ins-ico {
-  color: #1a1204;
-  background: #f0b429;
+  background: transparent;
+  color: #f0b429;
+  width: 16px;
+  height: 16px;
+}
+.cap-ins.warn .cap-ins-ico svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  fill: #f0b429;
+  transform: none;
+  transition: none;
 }
 .cap-ins.tip .cap-ins-ico,
 .cap-ins.up .cap-ins-ico {
