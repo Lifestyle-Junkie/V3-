@@ -71,7 +71,10 @@ function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
   box.innerHTML =
-    '<div class="cap-hold cap-hold-h"><span></span><span>Ticker</span><span>Price</span><span>Change</span></div>' +
+    '<div class="cap-hold cap-hold-h">' +
+      "<span></span><span>Ticker</span><span>Price</span>" +
+      '<span class="chg-h">Change<button type="button" class="cap-1d">1D</button></span>' +
+    "</div>" +
     CAP_HOLDINGS.map(function (h) {
       const src = CAP_LOGOS[h.t] || "";
       return (
