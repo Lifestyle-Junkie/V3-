@@ -63,9 +63,9 @@ function drawCapChart() {
     "</svg>";
 }
 function sparkHtml() {
-  var n = 12, html = '<span class="cap-spark"><span class="candle-chart">';
-  for (var i = 0; i < n; i++) html += '<span class="candle"></span>';
-  return html + "</span></span>";
+  var html = '<span class="cap-spark"><span class="candle-wrapper"><span class="candle-chart">';
+  for (var i = 0; i < 18; i++) html += '<span class="candle"></span>';
+  return html + "</span></span></span>";
 }
 function renderHolds() {
   const box = document.getElementById("capHolds");
