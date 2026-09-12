@@ -631,3 +631,21 @@
   color: #7e96b6;
   line-height: 1.3;
 }
+.cap-ins-h {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cap-bulb {
+  width: 11px;
+  height: 11px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.cap-bulb svg {
+  width: 11px;
+  height: 11px;
+  fill: #3ee07a;
+  display: block;
+}
