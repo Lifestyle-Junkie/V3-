@@ -1,11 +1,11 @@
 const CAP_LOGOS = {
-  AAPL: "https://logo.clearbit.com/apple.com",
-  TSLA: "https://logo.clearbit.com/tesla.com",
-  NVDA: "https://logo.clearbit.com/nvidia.com",
-  MSFT: "https://logo.clearbit.com/microsoft.com",
-  AMZN: "https://logo.clearbit.com/amazon.com",
-  GOOGL: "https://logo.clearbit.com/google.com",
-  GOOG: "https://logo.clearbit.com/google.com"
+  AAPL: "https://www.google.com/s2/favicons?sz=64&domain=apple.com",
+  TSLA: "https://www.google.com/s2/favicons?sz=64&domain=tesla.com",
+  NVDA: "https://www.google.com/s2/favicons?sz=64&domain=nvidia.com",
+  MSFT: "https://www.google.com/s2/favicons?sz=64&domain=microsoft.com",
+  AMZN: "https://www.google.com/s2/favicons?sz=64&domain=amazon.com",
+  GOOGL: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
+  GOOG: "https://www.google.com/s2/favicons?sz=64&domain=google.com"
 };
 
 const CAP_HOLDINGS = [
@@ -73,13 +73,21 @@ function renderHolds() {
     const src = CAP_LOGOS[h.t] || "";
     return (
       '<div class="cap-hold">' +
-      '<img class="tlogo" alt="" src="' + src + '" />' +
+      '<img class="tlogo" alt="' + h.t + '" src="' + src + '" />' +
       '<span class="tk">' + h.t + "</span>" +
       '<span class="pv">' + money(h.val) + "</span>" +
       '<span class="chg">+' + h.chg.toFixed(2) + "%</span>" +
       "</div>"
     );
   }).join("");
+  box.querySelectorAll("img.tlogo").forEach(function (img) {
+    img.addEventListener("error", function () {
+      const letter = document.createElement("span");
+      letter.className = "tlogo tlogo-fallback";
+      letter.textContent = (img.alt || "?").slice(0, 1);
+      img.replaceWith(letter);
+    });
+  });
 }
 
 function renderAlloc() {
