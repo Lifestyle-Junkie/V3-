@@ -1,22 +1,4 @@
-const CAP_LOGOS = {
-  AAPL: "https://www.google.com/s2/favicons?sz=64&domain=apple.com",
-  TSLA: "https://www.google.com/s2/favicons?sz=64&domain=tesla.com",
-  NVDA: "https://www.google.com/s2/favicons?sz=64&domain=nvidia.com",
-  MSFT: "https://www.google.com/s2/favicons?sz=64&domain=microsoft.com",
-  AMZN: "https://www.google.com/s2/favicons?sz=64&domain=amazon.com",
-  GOOGL: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
-  GOOG: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
-  HGV: "https://www.google.com/s2/favicons?sz=64&domain=hgv.com"
-};
-
-const CAP_HOLDINGS = [
-  { t: "AAPL", name: "Apple", val: 4321.12, chg: 1.24 },
-  { t: "TSLA", name: "Tesla", val: 3892.40, chg: 2.91 },
-  { t: "NVDA", name: "Nvidia", val: 2487.55, chg: 1.87 },
-  { t: "MSFT", name: "Microsoft", val: 2201.18, chg: 0.94 },
-  { t: "AMZN", name: "Amazon", val: 1882.34, chg: 1.12 },
-  { t: "GOOGL", name: "Alphabet", val: 1135.21, chg: 1.56 }
-];
+/* ── Capital HUD ─────────────────────────────────────────────────────── */
 
 const CAP_BILLS = [
   { name: "Rent", amt: 1450, due: "Sep 1", via: "Zelle - Mom", type: "Recurring", st: "paid" },
@@ -43,14 +25,14 @@ const CAP_MONTHS = [
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 
-/* ── Google Sheets live sync ─────────────────────────────────────────── */
+/* ── Google Sheets live sync (Robinhood total) ───────────────────────── */
 const SHEET_ID = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
 
-let liveRhTotal = 3948.34;   // fallback until first successful fetch
-let liveCash = 2500;         // never overwritten by sheet
+let liveRhTotal = 3948.34; // fallback until first successful fetch
+let liveCash = 2500;       // never overwritten by sheet
 
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
@@ -77,44 +59,32 @@ function updateNetWorthUI(rh, cash) {
   const rhEl = document.getElementById("capRhVal");
   const netEl = document.getElementById("capNet");
   const pieEl = document.getElementById("capPieTotal");
-
   if (rhEl) rhEl.textContent = money(rh);
   if (netEl) netEl.textContent = money(net);
   if (pieEl) pieEl.textContent = money(net);
-
-  // keep renderAlloc in sync
   renderAlloc(rh, cash, net);
 }
 
 async function fetchRobinhoodTotal() {
   try {
-    const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), {
-      cache: "no-store"
-    });
+    const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const csv = await res.text();
-
-    // Parse CSV (simple, handles quoted fields)
     const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) return;
 
     const headers = lines[0].split(",").map(h => h.replace(/^"|"$/g, "").trim());
-    const balIdx = headers.findIndex(h =>
-      /current\s*balance/i.test(h)
-    );
+    const balIdx = headers.findIndex(h => /current\s*balance/i.test(h));
     if (balIdx === -1) return;
 
-    // Find the Robinhood row (or first data row with a balance)
     for (let i = 1; i < lines.length; i++) {
       const cols = lines[i].match(/(".*?"|[^,]+)/g) || [];
       const cells = cols.map(c => c.replace(/^"|"$/g, "").trim());
       const name = (cells[1] || "").toLowerCase();
       const bal = parseMoney(cells[balIdx]);
-
       if (isFinite(bal) && (name.includes("robinhood") || i === 1)) {
         liveRhTotal = bal;
-        const cash = getCashFromDom();
-        updateNetWorthUI(liveRhTotal, cash);
+        updateNetWorthUI(liveRhTotal, getCashFromDom());
         return;
       }
     }
@@ -124,57 +94,61 @@ async function fetchRobinhoodTotal() {
 }
 
 function startLiveSync() {
-  fetchRobinhoodTotal();                 // immediate
-  setInterval(fetchRobinhoodTotal, 60000); // every 60 s
+  fetchRobinhoodTotal();
+  setInterval(fetchRobinhoodTotal, 60000);
 }
 
-/* ── Chart / holdings / bills (unchanged logic) ─────────────────────── */
-function drawCapChart() {
-  const el = document.getElementById("capChart");
-  if (!el) return;
-  const pts = [6, 8, 7, 9, 8, 11, 10, 13, 12, 16, 15, 18, 20, 19, 22, 24];
-  const w = 520, h = 140;
-  const max = Math.max.apply(null, pts);
-  const step = w / (pts.length - 1);
-  const path = pts.map((p, i) => {
-    const x = i * step;
-    const y = h - 16 - (p / max) * (h - 28);
-    return (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
-  }).join(" ");
-  const last = pts.length - 1;
-  const lx = last * step;
-  const ly = h - 16 - (pts[last] / max) * (h - 28);
-  el.innerHTML =
-    '<svg viewBox="0 0 ' + w + ' ' + h + '" preserveAspectRatio="none" width="100%" height="140">' +
-    '<path d="' + path + ' L' + w + ',' + h + ' L0,' + h + ' Z" fill="rgba(62,224,122,0.12)"/>' +
-    '<path d="' + path + '" fill="none" stroke="#3ee07a" stroke-width="2"/>' +
-    '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
-    "</svg>";
+/* ── Interactive tickers (empty start, no localStorage) ──────────────── */
+let holdings = []; // starts empty — Firebase later
+
+function logoUrl(ticker) {
+  return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
 }
 
 function sparkHtml() {
-  var n = 12, html = '<span class="cap-spark"><span class="candle-chart">';
-  for (var i = 0; i < n; i++) html += '<span class="candle"></span>';
+  let html = '<span class="cap-spark"><span class="candle-chart">';
+  for (let i = 0; i < 12; i++) html += '<span class="candle"></span>';
   return html + "</span></span>";
 }
 
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
-  box.innerHTML =
-    '<div class="cap-hold cap-hold-h"><span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span></div>' +
-    CAP_HOLDINGS.map(function (h) {
-      const src = CAP_LOGOS[h.t] || "";
-      return (
-        '<div class="cap-hold">' +
-        '<img class="tlogo" alt="' + h.t + '" src="' + src + '" />' +
-        '<span class="tk">' + h.t + "</span>" +
-        '<span class="pv">' + money(h.val) + "</span>" +
-        '<span class="chg">+' + h.chg.toFixed(2) + "%</span>" +
-        sparkHtml() +
-        "</div>"
-      );
-    }).join("");
+
+  // search bar + header + rows
+  let html =
+    '<div class="cap-ticker-search">' +
+      '<input id="capTickerInput" type="text" placeholder="Add ticker (e.g. AAPL)" maxlength="10" autocomplete="off" />' +
+      '<button type="button" id="capTickerAdd">Add</button>' +
+    "</div>" +
+    '<div class="cap-hold cap-hold-h">' +
+      "<span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span>" +
+    "</div>";
+
+  if (!holdings.length) {
+    html += '<div class="cap-hold-empty">No tickers yet — search above to add</div>';
+  } else {
+    holdings.forEach(function (h, idx) {
+      const chg = Number(h.chg) || 0;
+      const chgCls = chg >= 0 ? "up" : "down";
+      const chgTxt = (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%";
+      const priceTxt = h.price != null ? money(h.price) : "—";
+
+      html +=
+        '<div class="cap-hold" draggable="true" data-idx="' + idx + '">' +
+          '<img class="tlogo" alt="' + h.t + '" src="' + logoUrl(h.t) + '" />' +
+          '<span class="tk">' + h.t + "</span>" +
+          '<span class="pv">' + priceTxt + "</span>" +
+          '<span class="chg ' + chgCls + '">' + chgTxt + "</span>" +
+          sparkHtml() +
+          '<button type="button" class="cap-hold-rm" data-t="' + h.t + '" title="Remove">×</button>' +
+        "</div>";
+    });
+  }
+
+  box.innerHTML = html;
+
+  // logo fallbacks
   box.querySelectorAll("img.tlogo").forEach(function (img) {
     img.addEventListener("error", function () {
       const letter = document.createElement("span");
@@ -183,20 +157,159 @@ function renderHolds() {
       img.replaceWith(letter);
     });
   });
+
+  // search / add
+  const input = document.getElementById("capTickerInput");
+  const addBtn = document.getElementById("capTickerAdd");
+  function tryAdd() {
+    if (!input) return;
+    const sym = (input.value || "").trim().toUpperCase().replace(/[^A-Z0-9.\-]/g, "");
+    if (!sym) return;
+    addTicker(sym);
+    input.value = "";
+    input.focus();
+  }
+  if (addBtn) addBtn.addEventListener("click", tryAdd);
+  if (input) {
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        tryAdd();
+      }
+    });
+  }
+
+  // remove
+  box.querySelectorAll(".cap-hold-rm").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      removeTicker(btn.getAttribute("data-t"));
+    });
+  });
+
+  // drag & drop reorder
+  let dragIdx = null;
+  box.querySelectorAll(".cap-hold[draggable]").forEach(function (row) {
+    row.addEventListener("dragstart", function (e) {
+      dragIdx = Number(row.getAttribute("data-idx"));
+      row.classList.add("dragging");
+      e.dataTransfer.effectAllowed = "move";
+    });
+    row.addEventListener("dragend", function () {
+      row.classList.remove("dragging");
+      dragIdx = null;
+    });
+    row.addEventListener("dragover", function (e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    });
+    row.addEventListener("drop", function (e) {
+      e.preventDefault();
+      const toIdx = Number(row.getAttribute("data-idx"));
+      if (dragIdx == null || dragIdx === toIdx) return;
+      const item = holdings.splice(dragIdx, 1)[0];
+      holdings.splice(toIdx, 0, item);
+      renderHolds();
+    });
+  });
+}
+
+function addTicker(symbol) {
+  const t = symbol.toUpperCase();
+  if (holdings.some(h => h.t === t)) return; // already there
+  holdings.push({ t: t, name: t, price: null, chg: 0 });
+  renderHolds();
+  fetchQuotes(); // pull live price immediately
+}
+
+function removeTicker(symbol) {
+  const t = symbol.toUpperCase();
+  holdings = holdings.filter(h => h.t !== t);
+  renderHolds();
+}
+
+async function fetchQuotes() {
+  if (!holdings.length) return;
+  const symbols = holdings.map(h => h.t).join(",");
+  try {
+    // Yahoo public quote endpoint (no key)
+    const url =
+      "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" +
+      encodeURIComponent(symbols) +
+      "&_=" + Date.now();
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const results = (data && data.quoteResponse && data.quoteResponse.result) || [];
+
+    const map = {};
+    results.forEach(function (q) {
+      if (!q || !q.symbol) return;
+      map[q.symbol.toUpperCase()] = {
+        price: q.regularMarketPrice,
+        chg: q.regularMarketChangePercent,
+        name: q.shortName || q.longName || q.symbol
+      };
+    });
+
+    let changed = false;
+    holdings.forEach(function (h) {
+      const q = map[h.t];
+      if (!q) return;
+      if (q.price != null) {
+        h.price = q.price;
+        changed = true;
+      }
+      if (q.chg != null) {
+        h.chg = q.chg;
+        changed = true;
+      }
+      if (q.name) h.name = q.name;
+    });
+
+    if (changed) renderHolds();
+  } catch (err) {
+    console.warn("[capital] quote fetch failed:", err);
+  }
+}
+
+function startQuoteSync() {
+  fetchQuotes();
+  setInterval(fetchQuotes, 60000);
+}
+
+/* ── Chart / alloc / bills / months / insights ───────────────────────── */
+function drawCapChart() {
+  const el = document.getElementById("capChart");
+  if (!el) return;
+  const pts = [6, 8, 7, 9, 8, 11, 10, 13, 12, 16, 15, 18, 20, 19, 22, 24];
+  const w = 520, h = 140;
+  const max = Math.max.apply(null, pts);
+  const step = w / (pts.length - 1);
+  const path = pts.map(function (p, i) {
+    const x = i * step;
+    const y = h - 16 - (p / max) * (h - 28);
+    return (i ? "L" : "M") + x.toFixed(1) + "," + y.toFixed(1);
+  }).join(" ");
+  const last = pts.length - 1;
+  const lx = last * step;
+  const ly = h - 16 - (pts[last] / max) * (h - 28);
+  el.innerHTML =
+    '<svg viewBox="0 0 ' + w + " " + h + '" preserveAspectRatio="none" width="100%" height="140">' +
+    '<path d="' + path + " L" + w + "," + h + " L0," + h + ' Z" fill="rgba(62,224,122,0.12)"/>' +
+    '<path d="' + path + '" fill="none" stroke="#3ee07a" stroke-width="2"/>' +
+    '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
+    "</svg>";
 }
 
 function renderAlloc(rh, cash, net) {
   const el = document.getElementById("capAlloc");
   if (!el) return;
-
-  // fallbacks if called without args
   rh = rh != null ? rh : liveRhTotal;
   cash = cash != null ? cash : getCashFromDom();
   net = net != null ? net : rh + cash;
-
   const rhPct = net > 0 ? Math.round((rh / net) * 100) : 0;
   const cashPct = 100 - rhPct;
-
   el.innerHTML =
     "<div class='cap-alloc-pie'><div class='cap-alloc-center'><b>" +
     money(net).replace(/\.00$/, "") +
@@ -262,15 +375,15 @@ function renderInsights() {
   }).join("");
 }
 
+/* ── Boot ────────────────────────────────────────────────────────────── */
 function bootCapital() {
   drawCapChart();
   renderHolds();
-  renderAlloc();          // initial (will be overwritten by live data)
+  renderAlloc();
   renderBills();
   renderMonths();
   renderInsights();
 
-  // tab buttons
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll("[data-cap-tab]").forEach(function (b) {
@@ -280,7 +393,6 @@ function bootCapital() {
     });
   });
 
-  // range buttons
   document.querySelectorAll(".cap-ranges button").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll(".cap-ranges button").forEach(function (b) {
@@ -290,7 +402,7 @@ function bootCapital() {
     });
   });
 
-  // cash edit – does NOT touch Robinhood; only recalculates net
+  // cash edit – never touches Robinhood
   const cashBtn = document.getElementById("capCashEdit");
   if (cashBtn) {
     cashBtn.addEventListener("click", function () {
@@ -306,8 +418,8 @@ function bootCapital() {
     });
   }
 
-  // kick off live Robinhood sync
-  startLiveSync();
+  startLiveSync();   // Robinhood total from Sheets
+  startQuoteSync();  // live ticker prices
 }
 
 function goToCapitalTab() {
