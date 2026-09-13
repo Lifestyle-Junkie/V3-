@@ -115,7 +115,6 @@ function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
 
-  // search bar + header + rows
   let html =
     '<div class="cap-ticker-search">' +
       '<input id="capTickerInput" type="text" placeholder="Add ticker (e.g. AAPL)" maxlength="10" autocomplete="off" />' +
@@ -216,10 +215,10 @@ function renderHolds() {
 
 function addTicker(symbol) {
   const t = symbol.toUpperCase();
-  if (holdings.some(h => h.t === t)) return; // already there
+  if (holdings.some(h => h.t === t)) return;
   holdings.push({ t: t, name: t, price: null, chg: 0 });
   renderHolds();
-  fetchQuotes(); // pull live price immediately
+  fetchQuotes();
 }
 
 function removeTicker(symbol) {
@@ -228,49 +227,49 @@ function removeTicker(symbol) {
   renderHolds();
 }
 
+/* ── Live prices via local backend proxy ─────────────────────────────── */
 async function fetchQuotes() {
   if (!holdings.length) return;
-  const symbols = holdings.map(h => h.t).join(",");
-  try {
-    // Yahoo public quote endpoint (no key)
-    const url =
-      "https://query1.finance.yahoo.com/v7/finance/quote?symbols=" +
-      encodeURIComponent(symbols) +
-      "&_=" + Date.now();
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) throw new Error("HTTP " + res.status);
-    const data = await res.json();
-    const results = (data && data.quoteResponse && data.quoteResponse.result) || [];
 
-    const map = {};
-    results.forEach(function (q) {
-      if (!q || !q.symbol) return;
-      map[q.symbol.toUpperCase()] = {
-        price: q.regularMarketPrice,
-        chg: q.regularMarketChangePercent,
-        name: q.shortName || q.longName || q.symbol
-      };
-    });
-
-    let changed = false;
-    holdings.forEach(function (h) {
-      const q = map[h.t];
-      if (!q) return;
-      if (q.price != null) {
-        h.price = q.price;
-        changed = true;
+  const results = await Promise.all(
+    holdings.map(async function (h) {
+      try {
+        const res = await fetch(
+          "/api/quote?symbol=" + encodeURIComponent(h.t) + "&_=" + Date.now(),
+          { cache: "no-store" }
+        );
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const meta = await res.json();
+        return {
+          t: h.t,
+          price: meta.regularMarketPrice != null ? meta.regularMarketPrice : null,
+          chg: meta.regularMarketChangePercent != null ? meta.regularMarketChangePercent : 0,
+          name: meta.shortName || h.t
+        };
+      } catch (err) {
+        console.warn("[capital] quote failed for", h.t, err);
+        return null;
       }
-      if (q.chg != null) {
-        h.chg = q.chg;
-        changed = true;
-      }
-      if (q.name) h.name = q.name;
-    });
+    })
+  );
 
-    if (changed) renderHolds();
-  } catch (err) {
-    console.warn("[capital] quote fetch failed:", err);
-  }
+  let changed = false;
+  results.forEach(function (q) {
+    if (!q) return;
+    const h = holdings.find(function (x) { return x.t === q.t; });
+    if (!h) return;
+    if (q.price != null) {
+      h.price = q.price;
+      changed = true;
+    }
+    if (q.chg != null) {
+      h.chg = q.chg;
+      changed = true;
+    }
+    if (q.name) h.name = q.name;
+  });
+
+  if (changed) renderHolds();
 }
 
 function startQuoteSync() {
@@ -419,7 +418,7 @@ function bootCapital() {
   }
 
   startLiveSync();   // Robinhood total from Sheets
-  startQuoteSync();  // live ticker prices
+  startQuoteSync();  // live ticker prices via /api/quote
 }
 
 function goToCapitalTab() {
