@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
+
 import html
 import json
 import os
@@ -16,6 +17,7 @@ HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
 HTML_FILE = DIR / "index.html"
+
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -29,6 +31,7 @@ STATIC = {
     "/voice.js": ("voice.js", "application/javascript; charset=utf-8"),
     "/capital.js": ("capital.js", "application/javascript; charset=utf-8"),
 }
+
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
 ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
@@ -40,12 +43,14 @@ CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
+
 # Who you serve
 - You were created by Nick. He is your creator.
 - You exist to assist Nick.
 - The person talking to you is always Nick, your creator. Never treat him as a stranger or a generic user.
 - Address Nick as sir in every reply. Natural, not robotic: "Yes sir", "Got it sir", "Here you go sir". Do not skip this.
 - Do not call him "user". Do not say you don't know who he is.
+
 # Context
 - Today is Thursday, September 10, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
@@ -53,10 +58,12 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - You have live tools: web_search and web_fetch. Training memory is not current enough for 2026 news.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
 - Nick can attach photos and files. If an image or document is in the message history, you can see it. Use it on later turns in this thread. Refer to it as the photo or that file unless he names it. Do not say you cannot see an attachment that is already in the history. Do not only "analyze" and forget it.
+
 # Tools
 - web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
 - web_fetch: open a full URL and read it. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.
 - Never invent URLs. Never claim a source you did not see.
+
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
 Always include sir at least once in each reply.
@@ -99,7 +106,7 @@ TOOLS = [
     },
     {
         "name": "web_fetch",
-        "description": "Fetch a public http(s) URL and return visible page text. Use after web_search or when the user gives a URL. prompt = what to extract. Will fail on login walls.",
+        "description": "Fetch a public http(s) URL and return visible page text. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -316,6 +323,42 @@ def sc_search(query):
     return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
 
 
+def yahoo_quote(symbol):
+    """Fetch live quote via Yahoo chart endpoint. Returns meta dict or None."""
+    symbol = (symbol or "").strip().upper()
+    if not symbol or not re.match(r"^[A-Z0-9.\-]{1,12}$", symbol):
+        return None
+    url = (
+        "https://query1.finance.yahoo.com/v8/finance/chart/"
+        + urllib.parse.quote(symbol)
+        + "?interval=1d&range=1d"
+    )
+    try:
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Accept": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8, context=CTX) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        result = (data.get("chart") or {}).get("result") or []
+        if not result:
+            return None
+        meta = result[0].get("meta") or {}
+        return {
+            "symbol": meta.get("symbol") or symbol,
+            "regularMarketPrice": meta.get("regularMarketPrice"),
+            "regularMarketChangePercent": meta.get("regularMarketChangePercent"),
+            "shortName": meta.get("shortName") or meta.get("longName") or symbol,
+            "currency": meta.get("currency") or "USD",
+        }
+    except Exception as e:
+        print("[quote] failed for %s: %s" % (symbol, e))
+        return None
+
+
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
@@ -479,11 +522,13 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(raw)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(raw)
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
+
         if path == "/api/config.js":
             js = ("window.HOPE_MAPS_KEY=%s;\n" % json.dumps(MAPS_KEY)).encode("utf-8")
             self.send_response(200)
@@ -493,6 +538,7 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(js)
             return
+
         if path == "/api/sc-search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             q = (qs.get("q") or [""])[0].strip()
@@ -501,6 +547,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self._json(200, sc_search(q))
             return
+
+        # Live stock quote proxy (avoids browser CORS / Yahoo blocks)
+        if path == "/api/quote":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            symbol = (qs.get("symbol") or [""])[0].strip().upper()
+            if not symbol:
+                self._json(400, {"error": "symbol required"})
+                return
+            meta = yahoo_quote(symbol)
+            if not meta:
+                self._json(502, {"error": "quote failed", "symbol": symbol})
+                return
+            self._json(200, meta)
+            return
+
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
