@@ -475,7 +475,48 @@ img.rh-mark {
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
   border-radius: 8px; padding: 3px 7px; font: 600 10px Inter, sans-serif; cursor: pointer;
 }
+
+/* ── Holdings / interactive tickers ─────────────────────────────────── */
 .cap-holds { display: flex; flex-direction: column; gap: 0; }
+
+.cap-ticker-search {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.cap-ticker-search input {
+  flex: 1;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(120,190,255,0.25);
+  background: rgba(8,14,28,0.7);
+  color: #e8f1ff;
+  padding: 0 10px;
+  font: 12px Inter, sans-serif;
+  outline: 0;
+}
+.cap-ticker-search input::placeholder { color: #6d84a4; }
+.cap-ticker-search button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(120,190,255,0.35);
+  background: rgba(62,224,122,0.12);
+  color: #3ee07a;
+  font: 600 11px Inter, sans-serif;
+  cursor: pointer;
+}
+.cap-ticker-search button:hover {
+  background: rgba(62,224,122,0.2);
+}
+
+.cap-hold-empty {
+  padding: 14px 0;
+  font-size: 12px;
+  color: #7e96b6;
+  text-align: center;
+}
+
 .cap-hold {
   display: grid;
   grid-template-columns: 16px 36px 62px 52px 1fr;
@@ -483,7 +524,16 @@ img.rh-mark {
   align-items: center;
   padding: 2px 0;
   font-size: 10px;
+  position: relative;
+  cursor: grab;
 }
+.cap-hold.dragging {
+  opacity: 0.45;
+}
+.cap-hold:active {
+  cursor: grabbing;
+}
+
 .cap-hold-h {
   color: #8aa0bf;
   font-size: 8px;
@@ -492,8 +542,10 @@ img.rh-mark {
   border-bottom: 1px solid rgba(120,180,255,0.16);
   padding-bottom: 3px;
   margin-bottom: 1px;
+  cursor: default;
 }
 .cap-hold-h span { font-weight: 600; color: #8aa0bf; }
+
 .cap-hold img, .cap-hold .tlogo {
   width: 16px; height: 16px; border-radius: 4px; object-fit: cover; background: #101828;
 }
@@ -520,6 +572,35 @@ img.rh-mark {
   display: block;
   white-space: nowrap;
 }
+.cap-hold .chg.down {
+  color: #ff6b6b;
+}
+
+.cap-hold-rm {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #7e96b6;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  z-index: 2;
+}
+.cap-hold:hover .cap-hold-rm {
+  opacity: 1;
+}
+.cap-hold-rm:hover {
+  color: #ff6b6b;
+}
+
 .cap-spark { display: inline-flex; justify-content: flex-end; }
 .cap-spark .candle-wrapper {
   display: flex;
@@ -585,6 +666,7 @@ img.rh-mark {
   70%  { opacity: 0; transform: scaleY(1.5); }
   100% { opacity: 0; transform: scaleY(0); }
 }
+
 .cap-alloc {
   display: flex;
   align-items: center;
