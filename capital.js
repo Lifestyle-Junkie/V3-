@@ -5,8 +5,10 @@ const CAP_LOGOS = {
   MSFT: "https://www.google.com/s2/favicons?sz=64&domain=microsoft.com",
   AMZN: "https://www.google.com/s2/favicons?sz=64&domain=amazon.com",
   GOOGL: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
-  GOOG: "https://www.google.com/s2/favicons?sz=64&domain=google.com"
+  GOOG: "https://www.google.com/s2/favicons?sz=64&domain=google.com",
+  HGV: "https://www.google.com/s2/favicons?sz=64&domain=hgv.com"
 };
+
 const CAP_HOLDINGS = [
   { t: "AAPL", name: "Apple", val: 4321.12, chg: 1.24 },
   { t: "TSLA", name: "Tesla", val: 3892.40, chg: 2.91 },
@@ -15,6 +17,7 @@ const CAP_HOLDINGS = [
   { t: "AMZN", name: "Amazon", val: 1882.34, chg: 1.12 },
   { t: "GOOGL", name: "Alphabet", val: 1135.21, chg: 1.56 }
 ];
+
 const CAP_BILLS = [
   { name: "Rent", amt: 1450, due: "Sep 1", via: "Zelle - Mom", type: "Recurring", st: "paid" },
   { name: "Car Insurance", amt: 210, due: "Sep 15", via: "Card", type: "Recurring", st: "pend" },
@@ -27,6 +30,7 @@ const CAP_BILLS = [
   { name: "Software (One-Time)", amt: 120, due: "Sep 18", via: "Card", type: "One-Time", st: "paid" },
   { name: "Travel (Hotel)", amt: 350, due: "Sep 30", via: "Card", type: "One-Time", st: "pend" }
 ];
+
 const CAP_MONTHS = [
   { m: "Apr", v: 2000, ok: true },
   { m: "May", v: 2200, ok: true },
@@ -35,11 +39,96 @@ const CAP_MONTHS = [
   { m: "Aug", v: 1500, ok: false },
   { m: "Sep", v: 1500, ok: false }
 ];
+
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
+
+/* ── Google Sheets live sync ─────────────────────────────────────────── */
+const SHEET_ID = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
+const SHEET_ACCOUNTS_CSV =
+  "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+  "/gviz/tq?tqx=out:csv&sheet=Accounts";
+
+let liveRhTotal = 3948.34;   // fallback until first successful fetch
+let liveCash = 2500;         // never overwritten by sheet
+
 function money(n) {
-  return "$" + Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return "$" + Number(n).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
 }
+
+function parseMoney(str) {
+  if (str == null) return NaN;
+  const cleaned = String(str).replace(/[^0-9.\-]/g, "");
+  return Number(cleaned);
+}
+
+function getCashFromDom() {
+  const el = document.getElementById("capCashVal");
+  if (!el) return liveCash;
+  const n = parseMoney(el.textContent);
+  return isFinite(n) ? n : liveCash;
+}
+
+function updateNetWorthUI(rh, cash) {
+  const net = rh + cash;
+  const rhEl = document.getElementById("capRhVal");
+  const netEl = document.getElementById("capNet");
+  const pieEl = document.getElementById("capPieTotal");
+
+  if (rhEl) rhEl.textContent = money(rh);
+  if (netEl) netEl.textContent = money(net);
+  if (pieEl) pieEl.textContent = money(net);
+
+  // keep renderAlloc in sync
+  renderAlloc(rh, cash, net);
+}
+
+async function fetchRobinhoodTotal() {
+  try {
+    const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), {
+      cache: "no-store"
+    });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const csv = await res.text();
+
+    // Parse CSV (simple, handles quoted fields)
+    const lines = csv.trim().split(/\r?\n/);
+    if (lines.length < 2) return;
+
+    const headers = lines[0].split(",").map(h => h.replace(/^"|"$/g, "").trim());
+    const balIdx = headers.findIndex(h =>
+      /current\s*balance/i.test(h)
+    );
+    if (balIdx === -1) return;
+
+    // Find the Robinhood row (or first data row with a balance)
+    for (let i = 1; i < lines.length; i++) {
+      const cols = lines[i].match(/(".*?"|[^,]+)/g) || [];
+      const cells = cols.map(c => c.replace(/^"|"$/g, "").trim());
+      const name = (cells[1] || "").toLowerCase();
+      const bal = parseMoney(cells[balIdx]);
+
+      if (isFinite(bal) && (name.includes("robinhood") || i === 1)) {
+        liveRhTotal = bal;
+        const cash = getCashFromDom();
+        updateNetWorthUI(liveRhTotal, cash);
+        return;
+      }
+    }
+  } catch (err) {
+    console.warn("[capital] Sheets fetch failed:", err);
+  }
+}
+
+function startLiveSync() {
+  fetchRobinhoodTotal();                 // immediate
+  setInterval(fetchRobinhoodTotal, 60000); // every 60 s
+}
+
+/* ── Chart / holdings / bills (unchanged logic) ─────────────────────── */
 function drawCapChart() {
   const el = document.getElementById("capChart");
   if (!el) return;
@@ -62,11 +151,13 @@ function drawCapChart() {
     '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
     "</svg>";
 }
+
 function sparkHtml() {
   var n = 12, html = '<span class="cap-spark"><span class="candle-chart">';
   for (var i = 0; i < n; i++) html += '<span class="candle"></span>';
   return html + "</span></span>";
 }
+
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
@@ -93,16 +184,29 @@ function renderHolds() {
     });
   });
 }
-function renderAlloc() {
+
+function renderAlloc(rh, cash, net) {
   const el = document.getElementById("capAlloc");
   if (!el) return;
+
+  // fallbacks if called without args
+  rh = rh != null ? rh : liveRhTotal;
+  cash = cash != null ? cash : getCashFromDom();
+  net = net != null ? net : rh + cash;
+
+  const rhPct = net > 0 ? Math.round((rh / net) * 100) : 0;
+  const cashPct = 100 - rhPct;
+
   el.innerHTML =
-    "<div class='cap-alloc-pie'><div class='cap-alloc-center'><b>$18,420</b><span>Total</span></div></div>" +
+    "<div class='cap-alloc-pie'><div class='cap-alloc-center'><b>" +
+    money(net).replace(/\.00$/, "") +
+    "</b><span>Total</span></div></div>" +
     "<div class='cap-alloc-leg'>" +
-      "<div><i class='rh'></i>Robinhood 86%<b>$15,920.32</b></div>" +
-      "<div><i class='cash'></i>Cash 14%<b>$2,500.00</b></div>" +
+      "<div><i class='rh'></i>Robinhood " + rhPct + "%<b>" + money(rh) + "</b></div>" +
+      "<div><i class='cash'></i>Cash " + cashPct + "%<b>" + money(cash) + "</b></div>" +
     "</div>";
 }
+
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
@@ -123,6 +227,7 @@ function renderBills() {
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
 }
+
 function renderMonths() {
   const box = document.getElementById("capMonths");
   if (!box) return;
@@ -135,6 +240,7 @@ function renderMonths() {
     );
   }).join("");
 }
+
 function renderInsights() {
   const box = document.getElementById("capInsights");
   if (!box) return;
@@ -155,13 +261,16 @@ function renderInsights() {
     );
   }).join("");
 }
+
 function bootCapital() {
   drawCapChart();
   renderHolds();
-  renderAlloc();
+  renderAlloc();          // initial (will be overwritten by live data)
   renderBills();
   renderMonths();
   renderInsights();
+
+  // tab buttons
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll("[data-cap-tab]").forEach(function (b) {
@@ -170,6 +279,8 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
+
+  // range buttons
   document.querySelectorAll(".cap-ranges button").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll(".cap-ranges button").forEach(function (b) {
@@ -178,18 +289,27 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
-  const cash = document.getElementById("capCashEdit");
-  if (cash) {
-    cash.addEventListener("click", function () {
-      const next = prompt("Cash on hand", "2500");
+
+  // cash edit – does NOT touch Robinhood; only recalculates net
+  const cashBtn = document.getElementById("capCashEdit");
+  if (cashBtn) {
+    cashBtn.addEventListener("click", function () {
+      const current = getCashFromDom();
+      const next = prompt("Cash on hand", String(current));
       if (next == null) return;
-      const n = Number(String(next).replace(/[^0-9.]/g, ""));
+      const n = parseMoney(next);
       if (!isFinite(n)) return;
+      liveCash = n;
       const el = document.getElementById("capCashVal");
       if (el) el.textContent = money(n);
+      updateNetWorthUI(liveRhTotal, n);
     });
   }
+
+  // kick off live Robinhood sync
+  startLiveSync();
 }
+
 function goToCapitalTab() {
   document.querySelectorAll(".nav-item").forEach(function (i) {
     i.classList.remove("active");
@@ -197,11 +317,12 @@ function goToCapitalTab() {
   const nav = document.querySelector('.nav-item[data-view="capital"]');
   if (nav) nav.classList.add("active");
   if (typeof setView === "function") setView("capital");
-  else if (layout) {
+  else if (typeof layout !== "undefined" && layout) {
     layout.classList.remove("chat-mode", "music-mode", "maps-mode", "weather-mode");
     layout.classList.add("capital-mode");
   }
 }
+
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", bootCapital);
 } else {
