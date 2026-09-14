@@ -12,21 +12,19 @@ const CAP_MONTHS = [
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 
-/* ── Sheet IDs ───────────────────────────────────────────────────────── */
-const SHEET_ID_RH = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
+/* ── Single Google Sheet (Accounts + Transactions) ───────────────────── */
+const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
 const SHEET_ACCOUNTS_CSV =
-  "https://docs.google.com/spreadsheets/d/" + SHEET_ID_RH +
+  "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
-
-const SHEET_ID_TX = "12M5MpaYABgzjAnecRIsq-8XDeZK0sdVjlIUBCKcO6iA";
 const SHEET_TX_CSV =
-  "https://docs.google.com/spreadsheets/d/" + SHEET_ID_TX +
+  "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Transactions";
 
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
 
-/* Bills start empty — user adds via Edit */
+/* Bills start empty — user adds via top-right Edit */
 let CAP_BILLS = [];
 
 function money(n) {
@@ -99,7 +97,7 @@ function startLiveSync() {
   setInterval(fetchRobinhoodTotal, 60000);
 }
 
-/* ── Bills ↔ Transactions ────────────────────────────────────────────── */
+/* ── Bills ↔ Category ID match ───────────────────────────────────────── */
 function dueLabel(dueDay) {
   const d = Number(dueDay) || 1;
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
@@ -137,21 +135,22 @@ async function fetchTransactionsAndMatch() {
 
     const headers = parseCsvLine(lines[0]).map(function (h) { return h.toLowerCase(); });
     const idx = {
-      id: headers.findIndex(function (h) { return h === "id"; }),
       date: headers.findIndex(function (h) { return h === "date"; }),
       month: headers.findIndex(function (h) { return h === "month"; }),
-      summary: headers.findIndex(function (h) { return h === "summary"; }),
-      merchant: headers.findIndex(function (h) { return h === "merchant"; }),
       amount: headers.findIndex(function (h) { return h === "amount"; }),
       pending: headers.findIndex(function (h) { return /is\s*pending/i.test(h); }),
-      original: headers.findIndex(function (h) { return /original\s*description/i.test(h); }),
+      catId: headers.findIndex(function (h) { return /category\s*id/i.test(h); }),
+      catName: headers.findIndex(function (h) { return /category\s*name/i.test(h); }),
       net: headers.findIndex(function (h) { return /net\s*amount/i.test(h); })
     };
 
     const now = new Date();
     const thisMonth = now.getMonth();
     const thisYear = now.getFullYear();
-    const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+    const monthNames = [
+      "january","february","march","april","may","june",
+      "july","august","september","october","november","december"
+    ];
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
@@ -161,14 +160,11 @@ async function fetchTransactionsAndMatch() {
         idx.amount >= 0 ? cells[idx.amount] : (idx.net >= 0 ? cells[idx.net] : "")
       );
       const pendingRaw = (idx.pending >= 0 ? cells[idx.pending] : "").toLowerCase();
-      const pending = pendingRaw === "true" || pendingRaw === "yes" || pendingRaw === "1";
       rows.push({
-        id: idx.id >= 0 ? cells[idx.id] : "",
-        summary: idx.summary >= 0 ? cells[idx.summary] : "",
-        merchant: idx.merchant >= 0 ? cells[idx.merchant] : "",
-        original: idx.original >= 0 ? cells[idx.original] : "",
+        catId: idx.catId >= 0 ? String(cells[idx.catId] || "").trim() : "",
+        catName: idx.catName >= 0 ? cells[idx.catName] : "",
         amount: isFinite(amount) ? Math.abs(amount) : null,
-        pending: pending,
+        pending: pendingRaw === "true" || pendingRaw === "yes" || pendingRaw === "1",
         dateStr: idx.date >= 0 ? cells[idx.date] : "",
         monthStr: idx.month >= 0 ? cells[idx.month] : ""
       });
@@ -184,21 +180,19 @@ async function fetchTransactionsAndMatch() {
     }
 
     CAP_BILLS.forEach(function (bill) {
-      const key = (bill.txMatch || "").trim().toLowerCase();
+      const key = String(bill.categoryId || "").trim().toLowerCase();
       let matched = null;
       if (key) {
         for (let i = 0; i < rows.length; i++) {
           const r = rows[i];
           if (!rowInThisMonth(r)) continue;
-          const blob = (r.id + " " + r.summary + " " + r.merchant + " " + r.original).toLowerCase();
-          if (blob.indexOf(key) !== -1) {
+          if (String(r.catId).toLowerCase() === key) {
             matched = r;
             break;
           }
         }
       }
       bill.st = statusForBill(bill, matched);
-      // Keep user-entered amount; only overwrite if sheet has a match amount
       if (matched && matched.amount != null) {
         bill.amt = matched.amount;
       }
@@ -217,7 +211,7 @@ function startBillSync() {
   setInterval(fetchTransactionsAndMatch, 60000);
 }
 
-/** Top-right Edit → add a bill (name, amount, due day, match ID, type) */
+/** Top-right Edit → add bill (Category ID, not transaction ID) */
 function addBillViaEdit() {
   const name = prompt("Bill name (e.g. Car note)");
   if (name == null) return;
@@ -236,11 +230,11 @@ function addBillViaEdit() {
   if (due == null) return;
   const dueDay = Math.max(1, Math.min(31, parseInt(due, 10) || 1));
 
-  const match = prompt(
-    "Transaction match ID or text\n(e.g. 3534610001 or FORDCREDIT)\nOptional — leave blank",
+  const catId = prompt(
+    "Category ID from your sheet\n(e.g. LOAN_PAYMENTS_CAR_PAYMENT)\nStable each month — not the transaction ID",
     ""
   );
-  if (match == null) return;
+  if (catId == null) return;
 
   const typeAns = prompt("Type: Recurring or One-Time", "Recurring");
   if (typeAns == null) return;
@@ -251,7 +245,7 @@ function addBillViaEdit() {
     amt: amt,
     dueDay: dueDay,
     type: type,
-    txMatch: String(match).trim(),
+    categoryId: String(catId).trim(),
     st: "pend"
   });
 
@@ -259,30 +253,48 @@ function addBillViaEdit() {
   fetchTransactionsAndMatch();
 }
 
+function ensureBillEditButton() {
+  let btn = document.getElementById("capBillEdit");
+  if (btn) {
+    btn.onclick = addBillViaEdit;
+    return;
+  }
+
+  const box = document.getElementById("capBills");
+  if (!box) return;
+  const card = box.closest(".cap-card") || box.parentElement;
+  if (!card) return;
+
+  let head = card.querySelector(".cap-card-h");
+  if (!head) {
+    head = document.createElement("div");
+    head.className = "cap-card-h";
+    head.innerHTML = "<span>MONTHLY BILLS</span>";
+    card.insertBefore(head, box);
+  }
+
+  // Strip any stray Edit near column headers / outside card header
+  card.querySelectorAll("button.cap-edit, button.cap-bill-edit").forEach(function (b) {
+    if (b.id === "capBillEdit") return;
+    if (b.closest(".cap-bill-h") || !b.closest(".cap-card-h")) b.remove();
+  });
+
+  if (!head.querySelector("#capBillEdit")) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "capBillEdit";
+    btn.className = "cap-edit";
+    btn.textContent = "Edit";
+    btn.addEventListener("click", addBillViaEdit);
+    head.appendChild(btn);
+  }
+}
+
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
 
-  // Ensure header has Edit on the right (once)
-  const card = box.closest(".cap-card") || box.parentElement;
-  if (card) {
-    let head = card.querySelector(".cap-card-h");
-    if (!head) {
-      head = document.createElement("div");
-      head.className = "cap-card-h";
-      head.innerHTML = "<span>MONTHLY BILLS</span>";
-      card.insertBefore(head, box);
-    }
-    if (!head.querySelector("#capBillEdit")) {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.id = "capBillEdit";
-      btn.className = "cap-edit";
-      btn.textContent = "Edit";
-      btn.addEventListener("click", addBillViaEdit);
-      head.appendChild(btn);
-    }
-  }
+  ensureBillEditButton();
 
   let total = 0;
 
@@ -593,12 +605,6 @@ function bootCapital() {
       if (el) el.textContent = money(n);
       updateNetWorthUI(liveRhTotal, n);
     });
-  }
-
-  // If HTML already has an Edit button for bills, wire it
-  const existingEdit = document.getElementById("capBillEdit");
-  if (existingEdit) {
-    existingEdit.addEventListener("click", addBillViaEdit);
   }
 
   startLiveSync();
