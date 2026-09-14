@@ -1,18 +1,5 @@
 /* ── Capital HUD ─────────────────────────────────────────────────────── */
 
-const CAP_BILLS = [
-  { name: "Rent", amt: 1450, due: "Sep 1", via: "Zelle - Mom", type: "Recurring", st: "paid" },
-  { name: "Car Insurance", amt: 210, due: "Sep 15", via: "Card", type: "Recurring", st: "pend" },
-  { name: "Phone", amt: 85, due: "Sep 20", via: "Card", type: "Recurring", st: "paid" },
-  { name: "Water", amt: 200, due: "Sep 22", via: "Auto-Detected", type: "Recurring", st: "over" },
-  { name: "Credit Card", amt: 50, due: "Sep 25", via: "Card", type: "Recurring", st: "pend" },
-  { name: "Car Payment", amt: 469, due: "Sep 28", via: "Auto-Detected", type: "Recurring", st: "paid" },
-  { name: "Gym Membership", amt: 30, due: "Sep 10", via: "Card", type: "Recurring", st: "paid" },
-  { name: "Adobe (Hope)", amt: 22, due: "Sep 12", via: "Card", type: "Recurring", st: "paid" },
-  { name: "Software (One-Time)", amt: 120, due: "Sep 18", via: "Card", type: "One-Time", st: "paid" },
-  { name: "Travel (Hotel)", amt: 350, due: "Sep 30", via: "Card", type: "One-Time", st: "pend" }
-];
-
 const CAP_MONTHS = [
   { m: "Apr", v: 2000, ok: true },
   { m: "May", v: 2200, ok: true },
@@ -25,14 +12,35 @@ const CAP_MONTHS = [
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 
-/* ── Google Sheets live sync (Robinhood total) ───────────────────────── */
-const SHEET_ID = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
+/* ── Sheet IDs ───────────────────────────────────────────────────────── */
+// Robinhood / Accounts (existing)
+const SHEET_ID_RH = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
 const SHEET_ACCOUNTS_CSV =
-  "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
+  "https://docs.google.com/spreadsheets/d/" + SHEET_ID_RH +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
 
-let liveRhTotal = 3948.34; // fallback until first successful fetch
-let liveCash = 2500;       // never overwritten by sheet
+// Transactions (new sheet — bills matching)
+const SHEET_ID_TX = "12M5MpaYABgzjAnecRIsq-8XDeZK0sdVjlIUBCKcO6iA";
+const SHEET_TX_CSV =
+  "https://docs.google.com/spreadsheets/d/" + SHEET_ID_TX +
+  "/gviz/tq?tqx=out:csv&sheet=Transactions";
+
+let liveRhTotal = 3948.34;
+let liveCash = 2500;
+
+/* Bills: name, fallback amt, dueDay (1–31), type, txMatch (ID or description snippet) */
+let CAP_BILLS = [
+  { name: "Rent", amt: 1450, dueDay: 1, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Car Insurance", amt: 210, dueDay: 15, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Phone", amt: 85, dueDay: 20, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Water", amt: 200, dueDay: 22, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Credit Card", amt: 50, dueDay: 25, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Car Payment", amt: 469, dueDay: 28, type: "Recurring", txMatch: "3534610001", st: "pend" },
+  { name: "Gym Membership", amt: 30, dueDay: 10, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Adobe (Hope)", amt: 22, dueDay: 12, type: "Recurring", txMatch: "", st: "pend" },
+  { name: "Software (One-Time)", amt: 120, dueDay: 18, type: "One-Time", txMatch: "", st: "pend" },
+  { name: "Travel (Hotel)", amt: 350, dueDay: 30, type: "One-Time", txMatch: "", st: "pend" }
+];
 
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
@@ -65,21 +73,27 @@ function updateNetWorthUI(rh, cash) {
   renderAlloc(rh, cash, net);
 }
 
+function parseCsvLine(line) {
+  const cols = line.match(/(".*?"|[^,]*)/g) || [];
+  return cols.map(function (c) {
+    return c.replace(/^"|"$/g, "").replace(/""/g, '"').trim();
+  });
+}
+
+/* ── Google Sheets: Robinhood total ──────────────────────────────────── */
 async function fetchRobinhoodTotal() {
   try {
     const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const csv = await res.text();
+    if (csv.trim().startsWith("<!")) throw new Error("Sheet not shared");
     const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) return;
-
-    const headers = lines[0].split(",").map(h => h.replace(/^"|"$/g, "").trim());
-    const balIdx = headers.findIndex(h => /current\s*balance/i.test(h));
+    const headers = parseCsvLine(lines[0]);
+    const balIdx = headers.findIndex(function (h) { return /current\s*balance/i.test(h); });
     if (balIdx === -1) return;
-
     for (let i = 1; i < lines.length; i++) {
-      const cols = lines[i].match(/(".*?"|[^,]+)/g) || [];
-      const cells = cols.map(c => c.replace(/^"|"$/g, "").trim());
+      const cells = parseCsvLine(lines[i]);
       const name = (cells[1] || "").toLowerCase();
       const bal = parseMoney(cells[balIdx]);
       if (isFinite(bal) && (name.includes("robinhood") || i === 1)) {
@@ -89,7 +103,7 @@ async function fetchRobinhoodTotal() {
       }
     }
   } catch (err) {
-    console.warn("[capital] Sheets fetch failed:", err);
+    console.warn("[capital] Sheets RH fetch failed:", err);
   }
 }
 
@@ -98,8 +112,198 @@ function startLiveSync() {
   setInterval(fetchRobinhoodTotal, 60000);
 }
 
-/* ── Interactive tickers (empty start, no localStorage) ──────────────── */
-let holdings = []; // starts empty — Firebase later
+/* ── Bills ↔ Transactions matching ───────────────────────────────────── */
+function dueLabel(dueDay) {
+  const d = Number(dueDay) || 1;
+  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const now = new Date();
+  return months[now.getMonth()] + " " + d;
+}
+
+function statusForBill(bill, matched) {
+  const now = new Date();
+  const dueDay = Number(bill.dueDay) || 1;
+  const duePassed = now.getDate() > dueDay;
+
+  if (matched) {
+    if (matched.pending) return "pend";
+    return "paid";
+  }
+  // no match this month
+  return duePassed ? "over" : "pend";
+}
+
+async function fetchTransactionsAndMatch() {
+  try {
+    const res = await fetch(SHEET_TX_CSV + "&_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const csv = await res.text();
+    if (csv.trim().startsWith("<!")) throw new Error("Transactions sheet not shared (401)");
+
+    const lines = csv.trim().split(/\r?\n/);
+    if (lines.length < 2) {
+      // no rows — still recompute status from due dates
+      CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
+      renderBills();
+      return;
+    }
+
+    const headers = parseCsvLine(lines[0]).map(function (h) { return h.toLowerCase(); });
+    const idx = {
+      id: headers.findIndex(function (h) { return h === "id"; }),
+      date: headers.findIndex(function (h) { return h === "date"; }),
+      month: headers.findIndex(function (h) { return h === "month"; }),
+      summary: headers.findIndex(function (h) { return h === "summary"; }),
+      merchant: headers.findIndex(function (h) { return h === "merchant"; }),
+      amount: headers.findIndex(function (h) { return h === "amount"; }),
+      pending: headers.findIndex(function (h) { return /is\s*pending/i.test(h); }),
+      original: headers.findIndex(function (h) { return /original\s*description/i.test(h); }),
+      net: headers.findIndex(function (h) { return /net\s*amount/i.test(h); })
+    };
+
+    const now = new Date();
+    const thisMonth = now.getMonth();
+    const thisYear = now.getFullYear();
+
+    const rows = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = parseCsvLine(lines[i]);
+      if (!cells.length) continue;
+      const amount = parseMoney(
+        idx.amount >= 0 ? cells[idx.amount] : (idx.net >= 0 ? cells[idx.net] : "")
+      );
+      const pendingRaw = (idx.pending >= 0 ? cells[idx.pending] : "").toLowerCase();
+      const pending = pendingRaw === "true" || pendingRaw === "yes" || pendingRaw === "1";
+      const dateStr = idx.date >= 0 ? cells[idx.date] : "";
+      const monthStr = idx.month >= 0 ? cells[idx.month] : "";
+      rows.push({
+        id: idx.id >= 0 ? cells[idx.id] : "",
+        summary: idx.summary >= 0 ? cells[idx.summary] : "",
+        merchant: idx.merchant >= 0 ? cells[idx.merchant] : "",
+        original: idx.original >= 0 ? cells[idx.original] : "",
+        amount: isFinite(amount) ? Math.abs(amount) : null,
+        pending: pending,
+        dateStr: dateStr,
+        monthStr: monthStr
+      });
+    }
+
+    function rowInThisMonth(r) {
+      // try parse date
+      const d = new Date(r.dateStr);
+      if (!isNaN(d.getTime())) {
+        return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
+      }
+      // fallback: month column like "September 2026"
+      const m = (r.monthStr || "").toLowerCase();
+      const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+      return m.indexOf(monthNames[thisMonth]) !== -1 && m.indexOf(String(thisYear)) !== -1;
+    }
+
+    CAP_BILLS.forEach(function (bill) {
+      const key = (bill.txMatch || "").trim().toLowerCase();
+      let matched = null;
+
+      if (key) {
+        for (let i = 0; i < rows.length; i++) {
+          const r = rows[i];
+          if (!rowInThisMonth(r)) continue;
+          const blob = (
+            r.id + " " + r.summary + " " + r.merchant + " " + r.original
+          ).toLowerCase();
+          if (blob.indexOf(key) !== -1) {
+            matched = r;
+            break;
+          }
+        }
+      }
+
+      bill.st = statusForBill(bill, matched);
+      if (matched && matched.amount != null) {
+        bill.amt = matched.amount;
+      }
+    });
+
+    renderBills();
+  } catch (err) {
+    console.warn("[capital] Transactions match failed:", err);
+    // still show due-date-based status without sheet
+    CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
+    renderBills();
+  }
+}
+
+function startBillSync() {
+  fetchTransactionsAndMatch();
+  setInterval(fetchTransactionsAndMatch, 60000);
+}
+
+function editBill(idx) {
+  const b = CAP_BILLS[idx];
+  if (!b) return;
+
+  const name = prompt("Bill name", b.name);
+  if (name == null) return;
+
+  const match = prompt(
+    "Transaction match ID or text\n(e.g. 3534610001 or FORDCREDIT)\nLeave blank to clear",
+    b.txMatch || ""
+  );
+  if (match == null) return;
+
+  const due = prompt("Due day of month (1–31)", String(b.dueDay || 1));
+  if (due == null) return;
+
+  const dueDay = Math.max(1, Math.min(31, parseInt(due, 10) || 1));
+  const typeAns = prompt("Type: Recurring or One-Time", b.type || "Recurring");
+  if (typeAns == null) return;
+
+  b.name = name.trim() || b.name;
+  b.txMatch = String(match).trim();
+  b.dueDay = dueDay;
+  b.type = /one/i.test(typeAns) ? "One-Time" : "Recurring";
+
+  renderBills();
+  fetchTransactionsAndMatch(); // re-match immediately
+}
+
+function renderBills() {
+  const box = document.getElementById("capBills");
+  if (!box) return;
+
+  let total = 0;
+  box.innerHTML =
+    '<div class="cap-bill-h">' +
+      "<span>Bill</span><span>Amount</span><span>Due</span><span>Type</span><span>Status</span><span></span>" +
+    "</div>" +
+    CAP_BILLS.map(function (b, idx) {
+      total += Number(b.amt) || 0;
+      const label = b.st === "paid" ? "Paid" : b.st === "over" ? "Overdue" : "Pending";
+      return (
+        '<div class="cap-bill" data-idx="' + idx + '">' +
+          "<span>" + b.name + "</span>" +
+          "<span>" + money(b.amt) + "</span>" +
+          "<span>" + dueLabel(b.dueDay) + "</span>" +
+          "<span>" + b.type + "</span>" +
+          '<span class="st ' + b.st + '">' + label + "</span>" +
+          '<button type="button" class="cap-bill-edit" data-idx="' + idx + '" title="Edit">✎</button>' +
+        "</div>"
+      );
+    }).join("");
+
+  const tot = document.getElementById("capBillTotal");
+  if (tot) tot.textContent = money(total).replace(".00", "");
+
+  box.querySelectorAll(".cap-bill-edit").forEach(function (btn) {
+    btn.addEventListener("click", function (e) {
+      e.stopPropagation();
+      editBill(Number(btn.getAttribute("data-idx")));
+    });
+  });
+}
+
+/* ── Interactive tickers ─────────────────────────────────────────────── */
+let holdings = [];
 
 function logoUrl(ticker) {
   return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
@@ -132,7 +336,6 @@ function renderHolds() {
       const chgCls = chg >= 0 ? "up" : "down";
       const chgTxt = (chg >= 0 ? "+" : "") + chg.toFixed(2) + "%";
       const priceTxt = h.price != null ? money(h.price) : "—";
-
       html +=
         '<div class="cap-hold" draggable="true" data-idx="' + idx + '">' +
           '<img class="tlogo" alt="' + h.t + '" src="' + logoUrl(h.t) + '" />' +
@@ -147,7 +350,6 @@ function renderHolds() {
 
   box.innerHTML = html;
 
-  // logo fallbacks
   box.querySelectorAll("img.tlogo").forEach(function (img) {
     img.addEventListener("error", function () {
       const letter = document.createElement("span");
@@ -157,7 +359,6 @@ function renderHolds() {
     });
   });
 
-  // search / add
   const input = document.getElementById("capTickerInput");
   const addBtn = document.getElementById("capTickerAdd");
   function tryAdd() {
@@ -178,7 +379,6 @@ function renderHolds() {
     });
   }
 
-  // remove
   box.querySelectorAll(".cap-hold-rm").forEach(function (btn) {
     btn.addEventListener("click", function (e) {
       e.stopPropagation();
@@ -186,7 +386,6 @@ function renderHolds() {
     });
   });
 
-  // drag & drop reorder
   let dragIdx = null;
   box.querySelectorAll(".cap-hold[draggable]").forEach(function (row) {
     row.addEventListener("dragstart", function (e) {
@@ -215,7 +414,7 @@ function renderHolds() {
 
 function addTicker(symbol) {
   const t = symbol.toUpperCase();
-  if (holdings.some(h => h.t === t)) return;
+  if (holdings.some(function (h) { return h.t === t; })) return;
   holdings.push({ t: t, name: t, price: null, chg: 0 });
   renderHolds();
   fetchQuotes();
@@ -223,14 +422,12 @@ function addTicker(symbol) {
 
 function removeTicker(symbol) {
   const t = symbol.toUpperCase();
-  holdings = holdings.filter(h => h.t !== t);
+  holdings = holdings.filter(function (h) { return h.t !== t; });
   renderHolds();
 }
 
-/* ── Live prices via local backend proxy ─────────────────────────────── */
 async function fetchQuotes() {
   if (!holdings.length) return;
-
   const results = await Promise.all(
     holdings.map(async function (h) {
       try {
@@ -252,23 +449,15 @@ async function fetchQuotes() {
       }
     })
   );
-
   let changed = false;
   results.forEach(function (q) {
     if (!q) return;
     const h = holdings.find(function (x) { return x.t === q.t; });
     if (!h) return;
-    if (q.price != null) {
-      h.price = q.price;
-      changed = true;
-    }
-    if (q.chg != null) {
-      h.chg = q.chg;
-      changed = true;
-    }
+    if (q.price != null) { h.price = q.price; changed = true; }
+    if (q.chg != null) { h.chg = q.chg; changed = true; }
     if (q.name) h.name = q.name;
   });
-
   if (changed) renderHolds();
 }
 
@@ -277,7 +466,7 @@ function startQuoteSync() {
   setInterval(fetchQuotes, 60000);
 }
 
-/* ── Chart / alloc / bills / months / insights ───────────────────────── */
+/* ── Chart / alloc / months / insights ───────────────────────────────── */
 function drawCapChart() {
   const el = document.getElementById("capChart");
   if (!el) return;
@@ -317,27 +506,6 @@ function renderAlloc(rh, cash, net) {
       "<div><i class='rh'></i>Robinhood " + rhPct + "%<b>" + money(rh) + "</b></div>" +
       "<div><i class='cash'></i>Cash " + cashPct + "%<b>" + money(cash) + "</b></div>" +
     "</div>";
-}
-
-function renderBills() {
-  const box = document.getElementById("capBills");
-  if (!box) return;
-  let total = 0;
-  box.innerHTML = CAP_BILLS.map(function (b) {
-    total += b.amt;
-    const label = b.st === "paid" ? "Paid" : b.st === "over" ? "Overdue" : "Pending";
-    return (
-      '<div class="cap-bill">' +
-      "<span>" + b.name + "</span>" +
-      "<span>" + money(b.amt) + "</span>" +
-      "<span>" + b.due + "</span>" +
-      "<span>" + b.type + "</span>" +
-      '<span class="st ' + b.st + '">' + label + "</span>" +
-      "</div>"
-    );
-  }).join("");
-  const tot = document.getElementById("capBillTotal");
-  if (tot) tot.textContent = money(total).replace(".00", "");
 }
 
 function renderMonths() {
@@ -401,7 +569,6 @@ function bootCapital() {
     });
   });
 
-  // cash edit – never touches Robinhood
   const cashBtn = document.getElementById("capCashEdit");
   if (cashBtn) {
     cashBtn.addEventListener("click", function () {
@@ -417,8 +584,9 @@ function bootCapital() {
     });
   }
 
-  startLiveSync();   // Robinhood total from Sheets
-  startQuoteSync();  // live ticker prices via /api/quote
+  startLiveSync();
+  startQuoteSync();
+  startBillSync();
 }
 
 function goToCapitalTab() {
