@@ -13,13 +13,11 @@ const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 
 /* ── Sheet IDs ───────────────────────────────────────────────────────── */
-// Robinhood / Accounts (existing)
 const SHEET_ID_RH = "1jZHKrslQB1Xj9NN2EtqzBNAcdL9lVNhoT7dUheEyudM";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID_RH +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
 
-// Transactions (new sheet — bills matching)
 const SHEET_ID_TX = "12M5MpaYABgzjAnecRIsq-8XDeZK0sdVjlIUBCKcO6iA";
 const SHEET_TX_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID_TX +
@@ -28,19 +26,8 @@ const SHEET_TX_CSV =
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
 
-/* Bills: name, fallback amt, dueDay (1–31), type, txMatch (ID or description snippet) */
-let CAP_BILLS = [
-  { name: "Rent", amt: 1450, dueDay: 1, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Car Insurance", amt: 210, dueDay: 15, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Phone", amt: 85, dueDay: 20, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Water", amt: 200, dueDay: 22, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Credit Card", amt: 50, dueDay: 25, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Car Payment", amt: 469, dueDay: 28, type: "Recurring", txMatch: "3534610001", st: "pend" },
-  { name: "Gym Membership", amt: 30, dueDay: 10, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Adobe (Hope)", amt: 22, dueDay: 12, type: "Recurring", txMatch: "", st: "pend" },
-  { name: "Software (One-Time)", amt: 120, dueDay: 18, type: "One-Time", txMatch: "", st: "pend" },
-  { name: "Travel (Hotel)", amt: 350, dueDay: 30, type: "One-Time", txMatch: "", st: "pend" }
-];
+/* Bills start empty — user adds via Edit */
+let CAP_BILLS = [];
 
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
@@ -112,28 +99,29 @@ function startLiveSync() {
   setInterval(fetchRobinhoodTotal, 60000);
 }
 
-/* ── Bills ↔ Transactions matching ───────────────────────────────────── */
+/* ── Bills ↔ Transactions ────────────────────────────────────────────── */
 function dueLabel(dueDay) {
   const d = Number(dueDay) || 1;
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  const now = new Date();
-  return months[now.getMonth()] + " " + d;
+  return months[new Date().getMonth()] + " " + d;
 }
 
 function statusForBill(bill, matched) {
   const now = new Date();
   const dueDay = Number(bill.dueDay) || 1;
   const duePassed = now.getDate() > dueDay;
-
   if (matched) {
     if (matched.pending) return "pend";
     return "paid";
   }
-  // no match this month
   return duePassed ? "over" : "pend";
 }
 
 async function fetchTransactionsAndMatch() {
+  if (!CAP_BILLS.length) {
+    renderBills();
+    return;
+  }
   try {
     const res = await fetch(SHEET_TX_CSV + "&_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -142,7 +130,6 @@ async function fetchTransactionsAndMatch() {
 
     const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) {
-      // no rows — still recompute status from due dates
       CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
       renderBills();
       return;
@@ -164,6 +151,7 @@ async function fetchTransactionsAndMatch() {
     const now = new Date();
     const thisMonth = now.getMonth();
     const thisYear = now.getFullYear();
+    const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
 
     const rows = [];
     for (let i = 1; i < lines.length; i++) {
@@ -174,8 +162,6 @@ async function fetchTransactionsAndMatch() {
       );
       const pendingRaw = (idx.pending >= 0 ? cells[idx.pending] : "").toLowerCase();
       const pending = pendingRaw === "true" || pendingRaw === "yes" || pendingRaw === "1";
-      const dateStr = idx.date >= 0 ? cells[idx.date] : "";
-      const monthStr = idx.month >= 0 ? cells[idx.month] : "";
       rows.push({
         id: idx.id >= 0 ? cells[idx.id] : "",
         summary: idx.summary >= 0 ? cells[idx.summary] : "",
@@ -183,42 +169,36 @@ async function fetchTransactionsAndMatch() {
         original: idx.original >= 0 ? cells[idx.original] : "",
         amount: isFinite(amount) ? Math.abs(amount) : null,
         pending: pending,
-        dateStr: dateStr,
-        monthStr: monthStr
+        dateStr: idx.date >= 0 ? cells[idx.date] : "",
+        monthStr: idx.month >= 0 ? cells[idx.month] : ""
       });
     }
 
     function rowInThisMonth(r) {
-      // try parse date
       const d = new Date(r.dateStr);
       if (!isNaN(d.getTime())) {
         return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
       }
-      // fallback: month column like "September 2026"
       const m = (r.monthStr || "").toLowerCase();
-      const monthNames = ["january","february","march","april","may","june","july","august","september","october","november","december"];
       return m.indexOf(monthNames[thisMonth]) !== -1 && m.indexOf(String(thisYear)) !== -1;
     }
 
     CAP_BILLS.forEach(function (bill) {
       const key = (bill.txMatch || "").trim().toLowerCase();
       let matched = null;
-
       if (key) {
         for (let i = 0; i < rows.length; i++) {
           const r = rows[i];
           if (!rowInThisMonth(r)) continue;
-          const blob = (
-            r.id + " " + r.summary + " " + r.merchant + " " + r.original
-          ).toLowerCase();
+          const blob = (r.id + " " + r.summary + " " + r.merchant + " " + r.original).toLowerCase();
           if (blob.indexOf(key) !== -1) {
             matched = r;
             break;
           }
         }
       }
-
       bill.st = statusForBill(bill, matched);
+      // Keep user-entered amount; only overwrite if sheet has a match amount
       if (matched && matched.amount != null) {
         bill.amt = matched.amount;
       }
@@ -227,7 +207,6 @@ async function fetchTransactionsAndMatch() {
     renderBills();
   } catch (err) {
     console.warn("[capital] Transactions match failed:", err);
-    // still show due-date-based status without sheet
     CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
     renderBills();
   }
@@ -238,68 +217,100 @@ function startBillSync() {
   setInterval(fetchTransactionsAndMatch, 60000);
 }
 
-function editBill(idx) {
-  const b = CAP_BILLS[idx];
-  if (!b) return;
-
-  const name = prompt("Bill name", b.name);
+/** Top-right Edit → add a bill (name, amount, due day, match ID, type) */
+function addBillViaEdit() {
+  const name = prompt("Bill name (e.g. Car note)");
   if (name == null) return;
+  const nameTrim = name.trim();
+  if (!nameTrim) return;
+
+  const amtStr = prompt("Amount (e.g. 406.50)", "");
+  if (amtStr == null) return;
+  const amt = parseMoney(amtStr);
+  if (!isFinite(amt) || amt < 0) {
+    alert("Enter a valid amount");
+    return;
+  }
+
+  const due = prompt("Due day of month (1–31)", "1");
+  if (due == null) return;
+  const dueDay = Math.max(1, Math.min(31, parseInt(due, 10) || 1));
 
   const match = prompt(
-    "Transaction match ID or text\n(e.g. 3534610001 or FORDCREDIT)\nLeave blank to clear",
-    b.txMatch || ""
+    "Transaction match ID or text\n(e.g. 3534610001 or FORDCREDIT)\nOptional — leave blank",
+    ""
   );
   if (match == null) return;
 
-  const due = prompt("Due day of month (1–31)", String(b.dueDay || 1));
-  if (due == null) return;
-
-  const dueDay = Math.max(1, Math.min(31, parseInt(due, 10) || 1));
-  const typeAns = prompt("Type: Recurring or One-Time", b.type || "Recurring");
+  const typeAns = prompt("Type: Recurring or One-Time", "Recurring");
   if (typeAns == null) return;
+  const type = /one/i.test(typeAns || "") ? "One-Time" : "Recurring";
 
-  b.name = name.trim() || b.name;
-  b.txMatch = String(match).trim();
-  b.dueDay = dueDay;
-  b.type = /one/i.test(typeAns) ? "One-Time" : "Recurring";
+  CAP_BILLS.push({
+    name: nameTrim,
+    amt: amt,
+    dueDay: dueDay,
+    type: type,
+    txMatch: String(match).trim(),
+    st: "pend"
+  });
 
   renderBills();
-  fetchTransactionsAndMatch(); // re-match immediately
+  fetchTransactionsAndMatch();
 }
 
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
 
+  // Ensure header has Edit on the right (once)
+  const card = box.closest(".cap-card") || box.parentElement;
+  if (card) {
+    let head = card.querySelector(".cap-card-h");
+    if (!head) {
+      head = document.createElement("div");
+      head.className = "cap-card-h";
+      head.innerHTML = "<span>MONTHLY BILLS</span>";
+      card.insertBefore(head, box);
+    }
+    if (!head.querySelector("#capBillEdit")) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.id = "capBillEdit";
+      btn.className = "cap-edit";
+      btn.textContent = "Edit";
+      btn.addEventListener("click", addBillViaEdit);
+      head.appendChild(btn);
+    }
+  }
+
   let total = 0;
-  box.innerHTML =
-    '<div class="cap-bill-h">' +
-      "<span>Bill</span><span>Amount</span><span>Due</span><span>Type</span><span>Status</span><span></span>" +
-    "</div>" +
-    CAP_BILLS.map(function (b, idx) {
-      total += Number(b.amt) || 0;
-      const label = b.st === "paid" ? "Paid" : b.st === "over" ? "Overdue" : "Pending";
-      return (
-        '<div class="cap-bill" data-idx="' + idx + '">' +
-          "<span>" + b.name + "</span>" +
-          "<span>" + money(b.amt) + "</span>" +
-          "<span>" + dueLabel(b.dueDay) + "</span>" +
-          "<span>" + b.type + "</span>" +
-          '<span class="st ' + b.st + '">' + label + "</span>" +
-          '<button type="button" class="cap-bill-edit" data-idx="' + idx + '" title="Edit">✎</button>' +
-        "</div>"
-      );
-    }).join("");
+
+  if (!CAP_BILLS.length) {
+    box.innerHTML =
+      '<div class="cap-bill-empty">No bills yet — tap Edit to add one</div>';
+  } else {
+    box.innerHTML =
+      '<div class="cap-bill-h">' +
+        "<span>Bill</span><span>Amount</span><span>Due</span><span>Type</span><span>Status</span>" +
+      "</div>" +
+      CAP_BILLS.map(function (b) {
+        total += Number(b.amt) || 0;
+        const label = b.st === "paid" ? "Paid" : b.st === "over" ? "Overdue" : "Pending";
+        return (
+          '<div class="cap-bill">' +
+            "<span>" + b.name + "</span>" +
+            "<span>" + money(b.amt) + "</span>" +
+            "<span>" + dueLabel(b.dueDay) + "</span>" +
+            "<span>" + b.type + "</span>" +
+            '<span class="st ' + b.st + '">' + label + "</span>" +
+          "</div>"
+        );
+      }).join("");
+  }
 
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
-
-  box.querySelectorAll(".cap-bill-edit").forEach(function (btn) {
-    btn.addEventListener("click", function (e) {
-      e.stopPropagation();
-      editBill(Number(btn.getAttribute("data-idx")));
-    });
-  });
 }
 
 /* ── Interactive tickers ─────────────────────────────────────────────── */
@@ -582,6 +593,12 @@ function bootCapital() {
       if (el) el.textContent = money(n);
       updateNetWorthUI(liveRhTotal, n);
     });
+  }
+
+  // If HTML already has an Edit button for bills, wire it
+  const existingEdit = document.getElementById("capBillEdit");
+  if (existingEdit) {
+    existingEdit.addEventListener("click", addBillViaEdit);
   }
 
   startLiveSync();
