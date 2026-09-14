@@ -475,10 +475,14 @@ img.rh-mark {
   background: none; border: 1px solid rgba(130,190,255,0.28); color: #d4e8ff;
   border-radius: 8px; padding: 3px 7px; font: 600 10px Inter, sans-serif; cursor: pointer;
 }
+.cap-edit:hover {
+  border-color: rgba(126,203,255,0.45);
+  color: #e8f1ff;
+  background: rgba(80,150,255,0.1);
+}
 
 /* ── Holdings / interactive tickers ─────────────────────────────────── */
 .cap-holds { display: flex; flex-direction: column; gap: 0; }
-
 .cap-ticker-search {
   display: flex;
   gap: 8px;
@@ -509,14 +513,12 @@ img.rh-mark {
 .cap-ticker-search button:hover {
   background: rgba(62,224,122,0.2);
 }
-
 .cap-hold-empty {
   padding: 14px 0;
   font-size: 12px;
   color: #7e96b6;
   text-align: center;
 }
-
 .cap-hold {
   display: grid;
   grid-template-columns: 16px 36px 62px 52px 1fr;
@@ -533,7 +535,6 @@ img.rh-mark {
 .cap-hold:active {
   cursor: grabbing;
 }
-
 .cap-hold-h {
   color: #8aa0bf;
   font-size: 8px;
@@ -545,7 +546,6 @@ img.rh-mark {
   cursor: default;
 }
 .cap-hold-h span { font-weight: 600; color: #8aa0bf; }
-
 .cap-hold img, .cap-hold .tlogo {
   width: 16px; height: 16px; border-radius: 4px; object-fit: cover; background: #101828;
 }
@@ -575,7 +575,6 @@ img.rh-mark {
 .cap-hold .chg.down {
   color: #ff6b6b;
 }
-
 .cap-hold-rm {
   position: absolute;
   right: 0;
@@ -600,7 +599,6 @@ img.rh-mark {
 .cap-hold-rm:hover {
   color: #ff6b6b;
 }
-
 .cap-spark { display: inline-flex; justify-content: flex-end; }
 .cap-spark .candle-wrapper {
   display: flex;
@@ -666,7 +664,6 @@ img.rh-mark {
   70%  { opacity: 0; transform: scaleY(1.5); }
   100% { opacity: 0; transform: scaleY(0); }
 }
-
 .cap-alloc {
   display: flex;
   align-items: center;
@@ -708,7 +705,31 @@ img.rh-mark {
 .cap-alloc-leg b { display: block; color: #e8f1ff; margin-top: 2px; font-weight: 600; }
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
-.cap-bills { font-size: 11px; display: flex; flex-direction: column; min-width: 0; }
+
+/* ── Monthly bills (scroll + empty; no row pencils) ─────────────────── */
+.cap-bills {
+  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  max-height: 220px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(120,180,255,0.25) transparent;
+}
+.cap-bills::-webkit-scrollbar {
+  width: 4px;
+}
+.cap-bills::-webkit-scrollbar-thumb {
+  background: rgba(120,180,255,0.25);
+  border-radius: 4px;
+}
+.cap-bill-empty {
+  padding: 16px 0;
+  text-align: center;
+  font-size: 12px;
+  color: #7e96b6;
+}
 .cap-bill-h,
 .cap-bill {
   display: grid;
@@ -726,6 +747,10 @@ img.rh-mark {
   border-bottom: 1px solid rgba(120,180,255,0.16);
   padding-bottom: 7px;
   margin-bottom: 2px;
+  position: sticky;
+  top: 0;
+  background: rgba(8,14,28,0.95);
+  z-index: 1;
 }
 .cap-bill { border-bottom: 1px solid rgba(120,180,255,0.08); }
 .cap-bill > :nth-child(1) {
