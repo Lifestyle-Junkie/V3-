@@ -65,7 +65,7 @@ function parseCsvLine(line) {
   });
 }
 
-/* ── Google Sheets: Robinhood total ──────────────────────────────────── */
+/* ── Google Sheets: Robinhood individual only ────────────────────────── */
 async function fetchRobinhoodTotal() {
   try {
     const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), { cache: "no-store" });
@@ -74,18 +74,37 @@ async function fetchRobinhoodTotal() {
     if (csv.trim().startsWith("<!")) throw new Error("Sheet not shared");
     const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) return;
+
     const headers = parseCsvLine(lines[0]);
+    const nameIdx = headers.findIndex(function (h) { return /^name$/i.test(h); });
+    const bankIdx = headers.findIndex(function (h) { return /bank\s*connection$/i.test(h); });
     const balIdx = headers.findIndex(function (h) { return /current\s*balance/i.test(h); });
     if (balIdx === -1) return;
+
+    let found = null;
+
     for (let i = 1; i < lines.length; i++) {
       const cells = parseCsvLine(lines[i]);
-      const name = (cells[1] || "").toLowerCase();
+      const name = (nameIdx >= 0 ? cells[nameIdx] : cells[1] || "").trim();
+      const bank = (bankIdx >= 0 ? cells[bankIdx] : "").trim();
       const bal = parseMoney(cells[balIdx]);
-      if (isFinite(bal) && (name.includes("robinhood") || i === 1)) {
-        liveRhTotal = bal;
-        updateNetWorthUI(liveRhTotal, getCashFromDom());
-        return;
+      if (!isFinite(bal)) continue;
+
+      const nameL = name.toLowerCase();
+      const bankL = bank.toLowerCase();
+
+      if (nameL === "robinhood individual") {
+        found = bal;
+        break;
       }
+      if (found == null && (nameL.indexOf("robinhood") !== -1 || bankL === "robinhood")) {
+        found = bal;
+      }
+    }
+
+    if (found != null) {
+      liveRhTotal = found;
+      updateNetWorthUI(liveRhTotal, getCashFromDom());
     }
   } catch (err) {
     console.warn("[capital] Sheets RH fetch failed:", err);
@@ -273,7 +292,6 @@ function ensureBillEditButton() {
     card.insertBefore(head, box);
   }
 
-  // Strip any stray Edit near column headers / outside card header
   card.querySelectorAll("button.cap-edit, button.cap-bill-edit").forEach(function (b) {
     if (b.id === "capBillEdit") return;
     if (b.closest(".cap-bill-h") || !b.closest(".cap-card-h")) b.remove();
