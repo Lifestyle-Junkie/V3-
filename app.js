@@ -22,7 +22,6 @@ if (typeof resizeHomeMap !== "function") {
 if (typeof goToWeatherTab !== "function") {
   window.goToWeatherTab = function () { if (typeof setView === "function") setView("weather"); };
 }
-
 const input = document.getElementById("ask");
 const form = document.getElementById("askForm");
 const thread = document.getElementById("thread");
@@ -35,7 +34,6 @@ const mhPlay = document.getElementById("mhPlay");
 const scFrame = document.getElementById("scPlayer");
 const mhSearchForm = document.getElementById("mhSearchForm");
 const mhSearch = document.getElementById("mhSearch");
-
 let busy = false;
 let topics = [{ id: 1, title: "New topic", messages: [] }];
 let currentId = 1;
@@ -44,14 +42,85 @@ let pendingFiles = [];
 let musicPlaying = false;
 let scWidget = null;
 let currentSong = { title: "Nothing playing", artist: "Search a song", art: "", url: "" };
-
 const widgetSource = {
   maps: ".card.nearby",
   stocks: ".card.markets",
   weather: ".card.weather",
   music: ".card.music"
 };
-
+function slimContent(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return content == null ? "" : String(content);
+  const texts = content.filter(function (b) { return b && b.type === "text"; });
+  if (texts.length === 1) return texts[0].text || "";
+  if (texts.length) return texts.map(function (b) { return b.text || ""; }).join("\n");
+  return "[attachment]";
+}
+function slimTopics() {
+  return topics.map(function (t) {
+    return {
+      id: t.id,
+      title: t.title,
+      messages: (t.messages || []).map(function (m) {
+        return { role: m.role, content: slimContent(m.content) };
+      })
+    };
+  });
+}
+function saveChatHistory() {
+  fetch("/api/chat/history", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      topics: slimTopics(),
+      currentId: currentId,
+      nextId: nextId
+    })
+  }).catch(function (err) {
+    console.warn("[chat] save failed:", err);
+  });
+}
+async function loadChatHistory() {
+  try {
+    const res = await fetch("/api/chat/history?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.topics) && data.topics.length) {
+      topics = data.topics.map(function (t) {
+        return {
+          id: t.id,
+          title: t.title || "New topic",
+          messages: Array.isArray(t.messages) ? t.messages : []
+        };
+      });
+      currentId = data.currentId || topics[0].id;
+      const ids = topics.map(function (t) { return Number(t.id) || 0; });
+      nextId = data.nextId || (Math.max.apply(null, ids.concat([1])) + 1);
+      if (!topics.some(function (t) { return t.id === currentId; })) currentId = topics[0].id;
+    }
+  } catch (err) {
+    console.warn("[chat] load failed:", err);
+  }
+  renderThread();
+  renderTopics();
+}
+function messagesForHope() {
+  const out = [];
+  for (let i = topics.length - 1; i >= 0; i--) {
+    const t = topics[i];
+    const msgs = t.messages || [];
+    if (!msgs.length) continue;
+    out.push({ role: "user", content: "[Earlier topic: " + (t.title || "Untitled") + "]" });
+    out.push({ role: "assistant", content: "Got it sir, I still have that topic." });
+    msgs.forEach(function (m) {
+      if (m.role === "user" || m.role === "assistant") {
+        out.push({ role: m.role, content: slimContent(m.content) });
+      }
+    });
+  }
+  if (out.length > 50) return out.slice(-50);
+  return out;
+}
 function tickClock() {
   const now = new Date();
   const months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
@@ -66,13 +135,11 @@ function tickClock() {
 }
 tickClock();
 setInterval(tickClock, 1000);
-
-if (collapseBtn && layout) collapseBtn.addEventListener("click", () => layout.classList.toggle("collapsed"));
-if (histCollapse && layout) histCollapse.addEventListener("click", () => layout.classList.toggle("hist-hid"));
+if (collapseBtn && layout) collapseBtn.addEventListener("click", function () { layout.classList.toggle("collapsed"); });
+if (histCollapse && layout) histCollapse.addEventListener("click", function () { layout.classList.toggle("hist-hid"); });
 if (newTopicBtn) newTopicBtn.addEventListener("click", startTopic);
-
 function hideHuds() {
-  ["musicHud", "mapsHud", "weatherHud", "capitalHud"].forEach(id => {
+  ["musicHud", "mapsHud", "weatherHud", "capitalHud"].forEach(function (id) {
     const el = document.getElementById(id);
     if (!el) return;
     el.style.cssText = "";
@@ -161,9 +228,9 @@ function openWidget(name) {
     thread.scrollTop = thread.scrollHeight;
   }
 }
-document.querySelectorAll(".nav-item").forEach(item => {
-  item.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+document.querySelectorAll(".nav-item").forEach(function (item) {
+  item.addEventListener("click", function () {
+    document.querySelectorAll(".nav-item").forEach(function (i) { i.classList.remove("active"); });
     item.classList.add("active");
     const fromAttr = (item.getAttribute("data-view") || "").toLowerCase().trim();
     const fromLabel = ((item.querySelector(".t") || {}).textContent || "").toLowerCase().trim();
@@ -171,7 +238,7 @@ document.querySelectorAll(".nav-item").forEach(item => {
   });
 });
 function currentTopic() {
-  return topics.find(t => t.id === currentId) || topics[0];
+  return topics.find(function (t) { return t.id === currentId; }) || topics[0];
 }
 function shortTitle(text) {
   const s = (text || "").replace(/\s+/g, " ").trim();
@@ -180,7 +247,7 @@ function shortTitle(text) {
 function textFromContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
-  return content.filter(b => b && b.type === "text").map(b => b.text || "").join(" ").trim();
+  return content.filter(function (b) { return b && b.type === "text"; }).map(function (b) { return b.text || ""; }).join(" ").trim();
 }
 function showUserShot(dataUrl) {
   if (!thread) return;
@@ -194,7 +261,7 @@ function showUserShot(dataUrl) {
 }
 function renderUserContent(content) {
   if (Array.isArray(content)) {
-    content.forEach(b => {
+    content.forEach(function (b) {
       if (b && b.type === "image" && b.source && b.source.data) {
         showUserShot("data:" + (b.source.media_type || "image/jpeg") + ";base64," + b.source.data);
       }
@@ -208,7 +275,7 @@ function renderUserContent(content) {
 function renderThread() {
   if (!thread) return;
   thread.innerHTML = "";
-  currentTopic().messages.forEach(m => {
+  currentTopic().messages.forEach(function (m) {
     if (m.role === "widget") openWidget(m.content);
     else if (m.role === "user") renderUserContent(m.content);
     else addLine("Hope", typeof m.content === "string" ? m.content : textFromContent(m.content), "bot");
@@ -217,12 +284,12 @@ function renderThread() {
 function renderTopics() {
   if (!histList) return;
   histList.innerHTML = "";
-  const listed = topics.filter(t => t.messages.length || t.id === currentId);
+  const listed = topics.filter(function (t) { return t.messages.length || t.id === currentId; });
   if (!listed.length) {
     histList.innerHTML = '<div class="hist-empty">No topics yet</div>';
     return;
   }
-  listed.forEach(t => {
+  listed.forEach(function (t) {
     const el = document.createElement("div");
     el.className = "hist-item" + (t.id === currentId ? " on" : "");
     const name = document.createElement("div");
@@ -230,11 +297,16 @@ function renderTopics() {
     name.textContent = t.title;
     const meta = document.createElement("div");
     meta.className = "meta";
-    const n = t.messages.filter(m => m.role === "user").length;
+    const n = t.messages.filter(function (m) { return m.role === "user"; }).length;
     meta.textContent = n ? n + " message" + (n === 1 ? "" : "s") : "Empty";
     el.appendChild(name);
     el.appendChild(meta);
-    el.addEventListener("click", () => { currentId = t.id; renderThread(); renderTopics(); });
+    el.addEventListener("click", function () {
+      currentId = t.id;
+      renderThread();
+      renderTopics();
+      saveChatHistory();
+    });
     histList.appendChild(el);
   });
 }
@@ -245,6 +317,7 @@ function startTopic() {
   renderAttachRow();
   renderThread();
   renderTopics();
+  saveChatHistory();
   if (input) input.focus();
 }
 function addLine(who, text, cls) {
@@ -278,22 +351,23 @@ function detectWidget(text) {
   return null;
 }
 function fileToDataUrl(file) {
-  return new Promise((resolve, reject) => {
+  return new Promise(function (resolve, reject) {
     const r = new FileReader();
-    r.onload = () => resolve(r.result);
+    r.onload = function () { resolve(r.result); };
     r.onerror = reject;
     r.readAsDataURL(file);
   });
 }
-function shrinkImage(file, max = 1280) {
-  return new Promise((resolve) => {
+function shrinkImage(file, max) {
+  max = max || 1280;
+  return new Promise(function (resolve) {
     if (!file.type || !file.type.startsWith("image/")) {
-      fileToDataUrl(file).then(resolve).catch(() => resolve(null));
+      fileToDataUrl(file).then(resolve).catch(function () { resolve(null); });
       return;
     }
     const img = new Image();
     const url = URL.createObjectURL(file);
-    img.onload = () => {
+    img.onload = function () {
       const scale = Math.min(1, max / Math.max(img.width, img.height));
       const c = document.createElement("canvas");
       c.width = Math.max(1, Math.round(img.width * scale));
@@ -302,7 +376,7 @@ function shrinkImage(file, max = 1280) {
       URL.revokeObjectURL(url);
       resolve(c.toDataURL("image/jpeg", 0.82));
     };
-    img.onerror = () => { URL.revokeObjectURL(url); fileToDataUrl(file).then(resolve); };
+    img.onerror = function () { URL.revokeObjectURL(url); fileToDataUrl(file).then(resolve); };
     img.src = url;
   });
 }
@@ -310,7 +384,7 @@ function renderAttachRow() {
   const row = document.getElementById("attachRow");
   if (!row) return;
   row.innerHTML = "";
-  pendingFiles.forEach((f, i) => {
+  pendingFiles.forEach(function (f, i) {
     const chip = document.createElement("div");
     chip.className = "chip";
     if ((f.media || "").startsWith("image/") && f.data) {
@@ -325,14 +399,15 @@ function renderAttachRow() {
     x.type = "button";
     x.className = "x";
     x.textContent = "×";
-    x.addEventListener("click", () => { pendingFiles.splice(i, 1); renderAttachRow(); });
+    x.addEventListener("click", function () { pendingFiles.splice(i, 1); renderAttachRow(); });
     chip.appendChild(nm);
     chip.appendChild(x);
     row.appendChild(chip);
   });
 }
 async function addFiles(list) {
-  for (const file of list) {
+  for (let i = 0; i < list.length; i++) {
+    const file = list[i];
     if (!file || file.size > 8 * 1024 * 1024) continue;
     const dataUrl = await shrinkImage(file);
     if (!dataUrl || typeof dataUrl !== "string") continue;
@@ -341,13 +416,13 @@ async function addFiles(list) {
     const data = parts[1] || "";
     const media = ((meta.match(/data:([^;]+)/) || [])[1] || file.type || "application/octet-stream");
     const kind = media.startsWith("image/") ? "image" : (media === "application/pdf" ? "document" : "text");
-    pendingFiles.push({ name: file.name || "paste", media, data, kind });
+    pendingFiles.push({ name: file.name || "paste", media: media, data: data, kind: kind });
   }
   renderAttachRow();
 }
 function blocksFromPending(text) {
   const blocks = [];
-  pendingFiles.forEach(f => {
+  pendingFiles.forEach(function (f) {
     if (f.kind === "image") {
       blocks.push({ type: "image", source: { type: "base64", media_type: f.media || "image/jpeg", data: f.data } });
     } else if (f.kind === "document") {
@@ -365,17 +440,18 @@ function blocksFromPending(text) {
 const attachBtn = document.getElementById("attachBtn");
 const filePick = document.getElementById("filePick");
 if (attachBtn && filePick) {
-  attachBtn.addEventListener("click", () => filePick.click());
-  filePick.addEventListener("change", async () => {
+  attachBtn.addEventListener("click", function () { filePick.click(); });
+  filePick.addEventListener("change", async function () {
     await addFiles(filePick.files);
     filePick.value = "";
   });
 }
-document.addEventListener("paste", async (e) => {
+document.addEventListener("paste", async function (e) {
   const items = e.clipboardData && e.clipboardData.items;
   if (!items) return;
   const files = [];
-  for (const it of items) {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
     if (it.type && it.type.startsWith("image/")) {
       const f = it.getAsFile();
       if (f) files.push(f);
@@ -388,15 +464,19 @@ document.addEventListener("paste", async (e) => {
 });
 const dropTarget = document.querySelector(".search");
 if (dropTarget) {
-  ["dragenter", "dragover"].forEach(ev => dropTarget.addEventListener(ev, e => {
-    e.preventDefault();
-    dropTarget.classList.add("drop");
-  }));
-  ["dragleave", "drop"].forEach(ev => dropTarget.addEventListener(ev, e => {
-    e.preventDefault();
-    dropTarget.classList.remove("drop");
-  }));
-  dropTarget.addEventListener("drop", async e => {
+  ["dragenter", "dragover"].forEach(function (ev) {
+    dropTarget.addEventListener(ev, function (e) {
+      e.preventDefault();
+      dropTarget.classList.add("drop");
+    });
+  });
+  ["dragleave", "drop"].forEach(function (ev) {
+    dropTarget.addEventListener(ev, function (e) {
+      e.preventDefault();
+      dropTarget.classList.remove("drop");
+    });
+  });
+  dropTarget.addEventListener("drop", async function (e) {
     if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files);
   });
 }
@@ -410,27 +490,27 @@ function artUrl(raw) {
 }
 function setArt(src) {
   const url = artUrl(src);
-  ["mhArt", "mhDockArt", "homeMusicArt", "npArt"].forEach(id => {
+  ["mhArt", "mhDockArt", "homeMusicArt", "npArt"].forEach(function (id) {
     const el = document.getElementById(id);
     if (el && url) el.src = url;
   });
-  document.querySelectorAll(".card.music img, .mh-nowmini img, .mh-art").forEach(img => {
+  document.querySelectorAll(".card.music img, .mh-nowmini img, .mh-art").forEach(function (img) {
     if (url) img.src = url;
   });
 }
 function setSongText(title, artist) {
   const t = title || "Nothing playing";
   const a = artist || "Search a song";
-  ["mhTitle", "mhDockTitle", "homeMusicTitle", "npTitle"].forEach(id => {
+  ["mhTitle", "mhDockTitle", "homeMusicTitle", "npTitle"].forEach(function (id) {
     const el = document.getElementById(id);
     if (el) el.textContent = t;
   });
-  ["mhArtist", "mhDockArtist", "homeMusicArtist", "npArtist"].forEach(id => {
+  ["mhArtist", "mhDockArtist", "homeMusicArtist", "npArtist"].forEach(function (id) {
     const el = document.getElementById(id);
     if (el) el.textContent = a;
   });
-  document.querySelectorAll(".mh-title").forEach(el => { el.textContent = t; });
-  document.querySelectorAll(".mh-artist").forEach(el => { el.textContent = a; });
+  document.querySelectorAll(".mh-title").forEach(function (el) { el.textContent = t; });
+  document.querySelectorAll(".mh-artist").forEach(function (el) { el.textContent = a; });
 }
 function applySong(song) {
   currentSong = {
@@ -497,10 +577,12 @@ async function sendUserText(text) {
   renderAttachRow();
   if (topic.title === "New topic") topic.title = shortTitle(text || "Photo");
   renderTopics();
+  saveChatHistory();
   if (input) input.value = "";
   if (!hasFiles && typeof detectWeatherAsk === "function" && detectWeatherAsk(text)) {
     goToWeatherTab();
     topic.messages.push({ role: "widget", content: "weather" });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -509,6 +591,7 @@ async function sendUserText(text) {
   if (nearType) {
     if (typeof showNearbyCategory === "function") showNearbyCategory(nearType);
     topic.messages.push({ role: "widget", content: "maps" });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -524,6 +607,7 @@ async function sendUserText(text) {
       topic.messages.push({ role: "assistant", content: "Couldn't find that on SoundCloud." });
       if (typeof speakHope === "function") speakHope("Couldn't find that on SoundCloud, sir.");
     }
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -532,6 +616,7 @@ async function sendUserText(text) {
   if (widgetName === "music") {
     insertChatMusicCard();
     topic.messages.push({ role: "widget", content: "music" });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -539,6 +624,7 @@ async function sendUserText(text) {
   if (widgetName === "maps") {
     insertChatMapsCard();
     topic.messages.push({ role: "widget", content: "maps" });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -546,6 +632,7 @@ async function sendUserText(text) {
   if (widgetName === "capital") {
     goToCapitalTab();
     topic.messages.push({ role: "widget", content: "capital" });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -553,6 +640,7 @@ async function sendUserText(text) {
   if (widgetName) {
     openWidget(widgetName);
     topic.messages.push({ role: "widget", content: widgetName });
+    saveChatHistory();
     busy = false;
     if (input) input.focus();
     return;
@@ -564,9 +652,9 @@ async function sendUserText(text) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        messages: topic.messages.filter(m => m.role === "user" || m.role === "assistant"),
+        messages: messagesForHope(),
         location: (typeof origin !== "undefined" && origin) ? { lat: origin.lat, lng: origin.lng } : null
-      }),
+      })
     });
     const data = await res.json();
     const reply = data.text || data.error || "No reply";
@@ -574,6 +662,7 @@ async function sendUserText(text) {
     paintBotText(waiting, reply);
     if (data.text) {
       topic.messages.push({ role: "assistant", content: data.text });
+      saveChatHistory();
       if (typeof speakHope === "function") speakHope(data.text);
     }
   } catch (err) {
@@ -585,18 +674,18 @@ async function sendUserText(text) {
   if (input) input.focus();
 }
 if (form) {
-  form.addEventListener("submit", async (e) => {
+  form.addEventListener("submit", async function (e) {
     e.preventDefault();
     await sendUserText(input ? input.value : "");
   });
 }
-if (mhPlay) mhPlay.addEventListener("click", () => {
+if (mhPlay) mhPlay.addEventListener("click", function () {
   bootSc();
   if (!scWidget) return;
   if (musicPlaying) { scWidget.pause(); musicPlaying = false; }
   else { scWidget.play(); musicPlaying = true; }
 });
-if (mhSearchForm) mhSearchForm.addEventListener("submit", async (e) => {
+if (mhSearchForm) mhSearchForm.addEventListener("submit", async function (e) {
   e.preventDefault();
   const q = ((mhSearch && mhSearch.value) || "").trim();
   if (!q) return;
@@ -604,17 +693,16 @@ if (mhSearchForm) mhSearchForm.addEventListener("submit", async (e) => {
 });
 if (document.readyState === "complete") bootSc();
 else window.addEventListener("load", bootSc);
-
 const VIEW_ORDER = ["home", "chat", "music", "maps", "weather", "capital"];
 function currentView() {
   const on = document.querySelector(".nav-item.active");
   const v = ((on && on.getAttribute("data-view")) || "").toLowerCase();
-  return VIEW_ORDER.includes(v) ? v : "home";
+  return VIEW_ORDER.indexOf(v) !== -1 ? v : "home";
 }
 function goView(name) {
   const item = document.querySelector('.nav-item[data-view="' + name + '"]');
   if (!item) return;
-  document.querySelectorAll(".nav-item").forEach(i => i.classList.remove("active"));
+  document.querySelectorAll(".nav-item").forEach(function (i) { i.classList.remove("active"); });
   item.classList.add("active");
   setView(name);
 }
@@ -623,16 +711,16 @@ function shiftView(dir) {
   goView(VIEW_ORDER[(i + dir + VIEW_ORDER.length) % VIEW_ORDER.length]);
 }
 let dragX = null;
-document.addEventListener("pointerdown", e => {
+document.addEventListener("pointerdown", function (e) {
   if (e.target.closest("input,textarea,button,a,.search,.thread,.nav-item,.mp-map,#homeMap")) return;
   dragX = e.clientX;
 });
-document.addEventListener("pointerup", e => {
+document.addEventListener("pointerup", function (e) {
   if (dragX == null) return;
   const dx = e.clientX - dragX;
   dragX = null;
   if (Math.abs(dx) < 90) return;
   shiftView(dx < 0 ? 1 : -1);
 });
-document.addEventListener("pointercancel", () => { dragX = null; });
-renderTopics();
+document.addEventListener("pointercancel", function () { dragX = null; });
+loadChatHistory();
