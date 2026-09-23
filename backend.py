@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
-
+import csv
 import html
+import io
 import json
 import os
 import re
@@ -42,28 +43,42 @@ MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
 
-SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
+# Nick's live finance workbook (Anyone-with-link Viewer)
+SHEET_ID = os.environ.get(
+    "HOPE_SHEET_ID",
+    "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk",
+).strip()
+SHEET_TABS = [
+    "Bank Connections",
+    "Accounts",
+    "Balance History",
+    "Categories",
+    "Transactions",
+    "Securities",
+    "Holdings",
+    "Investment Transactions",
+]
 
+SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
 - You exist to assist Nick.
 - The person talking to you is always Nick, your creator. Never treat him as a stranger or a generic user.
 - Address Nick as sir in every reply. Natural, not robotic: "Yes sir", "Got it sir", "Here you go sir". Do not skip this.
 - Do not call him "user". Do not say you don't know who he is.
-
 # Context
 - Today is Thursday, September 10, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
-- You have live tools: web_search and web_fetch. Training memory is not current enough for 2026 news.
+- You have live tools: web_search, web_fetch, and read_sheet. Training memory is not current enough for 2026 news.
+- read_sheet reads Nick's live Google Sheet (Accounts, Transactions, Holdings, Categories, etc.). Use it for balances, bills, Category IDs, and portfolio questions. Do not guess money numbers if you can read the sheet.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
 - Nick can attach photos and files. If an image or document is in the message history, you can see it. Use it on later turns in this thread. Refer to it as the photo or that file unless he names it. Do not say you cannot see an attachment that is already in the history. Do not only "analyze" and forget it.
-
 # Tools
 - web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
 - web_fetch: open a full URL and read it. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.
+- read_sheet: read a tab from Nick's finance Google Sheet. Tabs: Accounts, Transactions, Holdings, Categories, Balance History, Securities, Investment Transactions, Bank Connections.
 - Never invent URLs. Never claim a source you did not see.
-
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
 Always include sir at least once in each reply.
@@ -116,6 +131,28 @@ TOOLS = [
             "required": ["url"],
         },
     },
+    {
+        "name": "read_sheet",
+        "description": "Read a tab from Nick's live finance Google Sheet. Use for Robinhood balance, bank accounts, transactions, bills by Category ID, holdings. Allowed tabs: Accounts, Transactions, Holdings, Categories, Balance History, Securities, Investment Transactions, Bank Connections.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tab": {
+                    "type": "string",
+                    "description": "Exact tab name, e.g. Accounts or Transactions",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Max rows to return (default 80, max 250)",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Optional filter text (category id, merchant, robinhood, ford, etc.)",
+                },
+            },
+            "required": ["tab"],
+        },
+    },
 ]
 
 
@@ -153,6 +190,119 @@ def strip_tags(text):
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
+
+
+def parse_csv_text(csv_text):
+    rows = []
+    reader = csv.reader(io.StringIO(csv_text))
+    for row in reader:
+        rows.append([c.strip() for c in row])
+    if not rows:
+        return [], []
+    headers = rows[0]
+    out = []
+    for raw in rows[1:]:
+        if not any(raw):
+            continue
+        item = {}
+        for i, h in enumerate(headers):
+            key = h or ("col_%d" % i)
+            item[key] = raw[i] if i < len(raw) else ""
+        out.append(item)
+    return headers, out
+
+
+def resolve_tab(name):
+    raw = (name or "").strip()
+    if not raw:
+        return None
+    for tab in SHEET_TABS:
+        if tab.lower() == raw.lower():
+            return tab
+    return None
+
+
+def fetch_sheet_tab(tab):
+    tab = resolve_tab(tab)
+    if not tab:
+        return None, "Unknown tab. Allowed: " + ", ".join(SHEET_TABS)
+    url = (
+        "https://docs.google.com/spreadsheets/d/"
+        + SHEET_ID
+        + "/gviz/tq?tqx=out:csv&sheet="
+        + urllib.parse.quote(tab)
+        + "&_="
+        + str(int(time.time()))
+    )
+    try:
+        _, text = http_get(
+            url,
+            timeout=20,
+            headers={"Accept": "text/csv,*/*"},
+        )
+    except Exception as e:
+        return None, "Sheet fetch failed: %s" % e
+    if text.lstrip().startswith("<"):
+        return None, "Sheet not shared as Anyone with the link (Viewer)."
+    headers, rows = parse_csv_text(text)
+    return {"tab": tab, "headers": headers, "rows": rows, "count": len(rows)}, None
+
+
+def filter_sheet_rows(rows, query, limit):
+    q = (query or "").strip().lower()
+    out = rows
+    if q:
+        filtered = []
+        for row in rows:
+            blob = " ".join(str(v) for v in row.values()).lower()
+            if q in blob:
+                filtered.append(row)
+        out = filtered
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 80
+    if limit < 1:
+        limit = 80
+    if limit > 250:
+        limit = 250
+    return out[:limit]
+
+
+def read_sheet(tab, query="", limit=80):
+    data, err = fetch_sheet_tab(tab)
+    if err:
+        return err
+    rows = filter_sheet_rows(data["rows"], query, limit)
+    payload = {
+        "tab": data["tab"],
+        "headers": data["headers"],
+        "count_total": data["count"],
+        "count_returned": len(rows),
+        "query": query or "",
+        "rows": rows,
+    }
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def robinhood_from_accounts(rows):
+    found = None
+    for row in rows:
+        name = str(row.get("Name") or "").strip().lower()
+        bank = str(row.get("Bank Connection") or "").strip().lower()
+        bal_raw = row.get("Current Balance") or ""
+        cleaned = re.sub(r"[^0-9.\-]", "", str(bal_raw))
+        try:
+            bal = float(cleaned) if cleaned else None
+        except Exception:
+            bal = None
+        if bal is None:
+            continue
+        if name == "robinhood individual":
+            return bal
+        if found is None and ("robinhood" in name or bank == "robinhood"):
+            found = bal
+    return found
 
 
 def web_search(query):
@@ -364,6 +514,8 @@ def run_tool(name, args):
         return web_search(args.get("query", ""))
     if name == "web_fetch":
         return web_fetch(args.get("url", ""), args.get("prompt", ""))
+    if name == "read_sheet":
+        return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
     return "Unknown tool: %s" % name
 
 
@@ -528,7 +680,6 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
-
         if path == "/api/config.js":
             js = ("window.HOPE_MAPS_KEY=%s;\n" % json.dumps(MAPS_KEY)).encode("utf-8")
             self.send_response(200)
@@ -538,7 +689,6 @@ class Handler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(js)
             return
-
         if path == "/api/sc-search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             q = (qs.get("q") or [""])[0].strip()
@@ -547,8 +697,6 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self._json(200, sc_search(q))
             return
-
-        # Live stock quote proxy (avoids browser CORS / Yahoo blocks)
         if path == "/api/quote":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             symbol = (qs.get("symbol") or [""])[0].strip().upper()
@@ -561,7 +709,40 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             self._json(200, meta)
             return
-
+        if path == "/api/sheet/tabs":
+            self._json(200, {"sheet_id": SHEET_ID, "tabs": SHEET_TABS})
+            return
+        if path == "/api/sheet/robinhood":
+            data, err = fetch_sheet_tab("Accounts")
+            if err:
+                self._json(502, {"error": err})
+                return
+            bal = robinhood_from_accounts(data["rows"])
+            if bal is None:
+                self._json(404, {"error": "Robinhood individual not found"})
+                return
+            self._json(200, {"account": "Robinhood individual", "current_balance": bal})
+            return
+        if path == "/api/sheet":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            tab = (qs.get("tab") or [""])[0]
+            query = (qs.get("q") or qs.get("query") or [""])[0]
+            limit = (qs.get("limit") or ["80"])[0]
+            data, err = fetch_sheet_tab(tab)
+            if err:
+                code = 400 if err.startswith("Unknown") else 502
+                self._json(code, {"error": err, "tabs": SHEET_TABS})
+                return
+            rows = filter_sheet_rows(data["rows"], query, limit)
+            self._json(200, {
+                "tab": data["tab"],
+                "headers": data["headers"],
+                "count_total": data["count"],
+                "count_returned": len(rows),
+                "query": query,
+                "rows": rows,
+            })
+            return
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
@@ -661,4 +842,5 @@ if __name__ == "__main__":
     print("ANTHROPIC_API_KEY:", "set" if API_KEY else "MISSING")
     print("GOOGLE_MAPS_KEY:", "set" if MAPS_KEY else "MISSING")
     print("ELEVENLABS_API_KEY:", "set" if ELEVEN_KEY else "MISSING")
+    print("SHEET_ID:", SHEET_ID)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()
