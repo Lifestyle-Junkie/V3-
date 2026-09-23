@@ -59,49 +59,26 @@ SHEET_TABS = [
     "Investment Transactions",
 ]
 BILLS_FILE = DIR / "hope-bills.json"
-ALIASES = {
-    "car note": "car payment",
-    "car note payment": "car payment",
-    "car loan": "car payment",
-    "ford": "car payment",
-    "ford credit": "car payment",
-    "auto loan": "car payment",
-    "phone bill": "mobile phone",
-    "cell": "mobile phone",
-    "rent": "rent",
-    "insurance": "auto insurance",
-}
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
-- You exist to assist Nick.
-- The person talking to you is always Nick, your creator. Never treat him as a stranger or a generic user.
-- Address Nick as sir in every reply. Natural, not robotic: "Yes sir", "Got it sir", "Here you go sir". Do not skip this.
-- Do not call him "user". Do not say you don't know who he is.
+- The person talking to you is always Nick. Address him as sir in every reply.
 # Context
-- Today is Thursday, September 10, 2026.
-- Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
-- If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
-- You have live tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
-- add_monthly_bill: add a bill from a phrase. Do NOT ask amount, category ID, or type. Each bill gets its own generated id. categoryId is only a tag — many bills can share one category. Same exact name updates that row; a different name always creates a new row.
-- update_monthly_bill / delete_monthly_bill: match by bill id first, then exact name. Never match only on categoryId.
-- dueDay is a fixed day-of-month. Status is Paid only if a matching transaction falls in the current cycle (last dueDay → next dueDay). Display due is cycle end.
-- read_sheet: live Accounts / Transactions / Holdings / Categories.
-- This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
-- Nick can attach photos and files. If an image or document is in the message history, you can see it.
-# Tools
-- web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
-- Never invent URLs. Never claim a source you did not see.
+- Today is Wednesday, September 23, 2026.
+- Nick lives in Fort Lauderdale, Florida (Eastern Time).
+- Tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
+- Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
+- add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
+- update_monthly_bill: change name, amount, due_day, type, or status (paid/upcoming/unpaid) by bill id or exact name.
+- delete_monthly_bill: by id or exact name.
+- read_sheet: only when Nick asks about accounts, transactions, holdings, or other sheet data.
 # Output style
-Default: short, direct, human. Lead with the answer. Then one short why. No filler.
-Always include sir at least once in each reply.
-Live facts: answer only from tool text.
+Short, direct. Include sir once. Live facts from tools only.
 Always end live answers with:
 Sources:
 - [Title](URL)
-If tools failed, say that in one line. Do not guess.
-Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken.
+Spoken replies: short, no markdown sources.
 """
 
 TOOLS = [
@@ -116,19 +93,16 @@ TOOLS = [
     },
     {
         "name": "web_fetch",
-        "description": "Fetch a public http(s) URL and return visible page text.",
+        "description": "Fetch a public http(s) URL.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "url": {"type": "string"},
-                "prompt": {"type": "string"},
-            },
+            "properties": {"url": {"type": "string"}, "prompt": {"type": "string"}},
             "required": ["url"],
         },
     },
     {
         "name": "read_sheet",
-        "description": "Read a tab from Nick's live finance Google Sheet.",
+        "description": "Read a finance sheet tab. Never use this for monthly bills.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -141,20 +115,21 @@ TOOLS = [
     },
     {
         "name": "add_monthly_bill",
-        "description": "Add a monthly bill. Unique key is generated bill id or exact name. categoryId is metadata only; multiple bills may share a category.",
+        "description": "Add a bill from a phrase. No sheet. Example: rent 1450 due the 1st.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "phrase": {"type": "string"},
                 "due_day": {"type": "integer"},
                 "name": {"type": "string"},
+                "amount": {"type": "number"},
             },
             "required": ["phrase"],
         },
     },
     {
         "name": "update_monthly_bill",
-        "description": "Update a bill by generated id first, then exact name. Do not key off categoryId.",
+        "description": "Update a bill by id or exact name. Fields: name, due_day, amount, type, status.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -163,13 +138,14 @@ TOOLS = [
                 "due_day": {"type": "integer"},
                 "amount": {"type": "number"},
                 "type": {"type": "string"},
+                "status": {"type": "string"},
             },
             "required": ["id"],
         },
     },
     {
         "name": "delete_monthly_bill",
-        "description": "Delete a bill by generated id first, then exact name. Do not key off categoryId.",
+        "description": "Delete a bill by id or exact name.",
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "string"}},
@@ -308,21 +284,6 @@ def parse_money(val):
         return None
 
 
-def parse_txn_date(val):
-    s = str(val or "").strip()
-    if not s:
-        return None
-    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y", "%Y-%m-%d"):
-        try:
-            return datetime.strptime(re.sub(r"\s+", " ", s), fmt)
-        except Exception:
-            continue
-    try:
-        return datetime.fromisoformat(s[:10])
-    except Exception:
-        return None
-
-
 def clamp_due(year, month, due_day):
     last = calendar.monthrange(year, month)[1]
     return datetime(year, month, min(max(1, int(due_day or 1)), last))
@@ -347,10 +308,6 @@ def cycle_window(due_day, today=None):
     return start, end
 
 
-def in_cycle(dt, start, end):
-    return dt is not None and start <= dt < end
-
-
 def load_bills():
     if not BILLS_FILE.exists():
         return []
@@ -372,124 +329,64 @@ def new_bill_id():
     )
 
 
-def score_category(phrase, cat):
-    p = (phrase or "").strip().lower()
-    p = ALIASES.get(p, p)
-    cid = str(cat.get("ID") or "").lower()
-    name = str(cat.get("Name") or "").lower()
-    group = str(cat.get("Category Group") or "").lower()
-    desc = str(cat.get("Description") or "").lower()
-    blob = " ".join([cid.replace("_", " "), name, group, desc])
-    score = 0
-    if p == name:
-        score += 12
-    if p in name:
-        score += 8
-    if name and name in p:
-        score += 8
-    for word in re.findall(r"[a-z0-9]+", p):
-        if len(word) < 3:
-            continue
-        if word in name or word in cid.lower().replace("_", " "):
-            score += 3
-        if word in blob:
-            score += 1
-    return score
+def parse_due_day(text):
+    t = (text or "").lower()
+    m = re.search(r"\bdue(?:\s+on)?(?:\s+the)?\s+(\d{1,2})(?:st|nd|rd|th)?\b", t)
+    if m:
+        return max(1, min(31, int(m.group(1))))
+    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)\b", t)
+    if m:
+        return max(1, min(31, int(m.group(1))))
+    return None
 
 
-def pick_category(phrase, cats):
-    ranked = sorted(((score_category(phrase, c), c) for c in cats), key=lambda x: -x[0])
-    if not ranked or ranked[0][0] < 3:
+def parse_amount(text):
+    m = re.search(r"\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d+)", text or "")
+    if not m:
         return None
-    return ranked[0][1]
+    return parse_money(m.group(1))
 
 
-def txn_matches_cat(row, cat_id):
-    return str(row.get("Category ID") or "").strip().upper() == str(cat_id or "").strip().upper()
+def parse_bill_name(text, amount=None):
+    t = (text or "").strip()
+    t = re.sub(r"(?i)\b(add|update|monthly\s+bill|bill)\b", " ", t)
+    t = re.sub(r"(?i)\bdue(?:\s+on)?(?:\s+the)?\s+\d{1,2}(?:st|nd|rd|th)?\b", " ", t)
+    t = re.sub(r"(?i)\b\d{1,2}(?:st|nd|rd|th)\b", " ", t)
+    if amount is not None:
+        t = re.sub(r"\$?\s*" + re.escape(str(int(amount))) + r"(?:\.\d+)?", " ", t)
+        t = re.sub(r"\$?\s*" + re.escape("%.2f" % amount), " ", t)
+    t = re.sub(r"\s+", " ", t).strip(" -")
+    return t.title() if t else "Bill"
 
 
-def infer_bill(phrase, display_name=None, due_day_override=None):
+def infer_bill(phrase, display_name=None, due_day_override=None, amount_override=None):
     phrase = (phrase or "").strip()
     if not phrase:
         return None, "Need a bill name."
-    cats_data, err = fetch_sheet_tab("Categories")
-    if err:
-        return None, err
-    tx_data, err = fetch_sheet_tab("Transactions")
-    if err:
-        return None, err
-    cat = pick_category(phrase, cats_data["rows"])
-    if not cat:
-        return None, "Could not match %r to a Category ID on the sheet." % phrase
-    cat_id = str(cat.get("ID") or "").strip()
-    cat_name = str(cat.get("Name") or phrase).strip()
+    amt = amount_override if amount_override is not None else parse_amount(phrase)
+    due_day = due_day_override if due_day_override is not None else parse_due_day(phrase)
+    try:
+        due_day = max(1, min(31, int(due_day))) if due_day is not None else 1
+        due_source = "override" if due_day_override is not None else ("parsed" if parse_due_day(phrase) else "default")
+    except Exception:
+        due_day, due_source = 1, "default"
+    if amt is None:
+        amt = 0
+    label = (display_name or parse_bill_name(phrase, amt)).strip() or phrase.title()
     now = datetime.now()
-    matched = []
-    for row in tx_data["rows"]:
-        if not txn_matches_cat(row, cat_id):
-            continue
-        dt = parse_txn_date(row.get("Date"))
-        amt = parse_money(row.get("Amount") or row.get("Net Amount"))
-        pending_raw = str(row.get("Is Pending?") or "").strip().lower()
-        matched.append({
-            "date": dt,
-            "amount": abs(amt) if amt is not None else None,
-            "pending": pending_raw in ("true", "yes", "1"),
-            "summary": row.get("Summary") or row.get("Original Description") or "",
-        })
-
-    dated = [x for x in matched if x["date"]]
-    dated.sort(key=lambda r: r["date"], reverse=True)
-    latest = dated[0] if dated else None
-
-    if due_day_override is not None:
-        try:
-            due_day = max(1, min(31, int(due_day_override)))
-            due_source = "override"
-        except Exception:
-            due_day = latest["date"].day if latest else 1
-            due_source = "seed"
-    elif latest:
-        due_day = latest["date"].day
-        due_source = "seed"
-    else:
-        due_day = 1
-        due_source = "default"
-
     start, end = cycle_window(due_day, now)
-    in_window = [x for x in dated if in_cycle(x["date"], start, end)]
-    amt = latest["amount"] if latest and latest["amount"] is not None else 0
-    if in_window:
-        hit = in_window[0]
-        if hit["amount"] is not None:
-            amt = hit["amount"]
-        st = "pend" if hit["pending"] else "paid"
-    else:
-        st = "over" if now >= end else "pend"
-
-    if display_name:
-        label = str(display_name).strip()
-    else:
-        label = phrase.strip()
-        if label.lower() == cat_name.lower():
-            label = cat_name
-        else:
-            label = label.title()
-
+    this_due = clamp_due(now.year, now.month, due_day)
+    st = "over" if now > this_due else "pend"
     return {
         "id": new_bill_id(),
         "name": label,
-        "amt": amt,
+        "amt": abs(float(amt)),
         "dueDay": due_day,
         "dueSource": due_source,
         "cycleStart": start.strftime("%Y-%m-%d"),
         "cycleEnd": end.strftime("%Y-%m-%d"),
-        "latestTxnDate": latest["date"].strftime("%Y-%m-%d") if latest else "",
-        "type": "Recurring" if len(dated) >= 2 else "One-Time",
-        "categoryId": cat_id,
-        "categoryName": cat_name,
+        "type": "Recurring",
         "st": st,
-        "matchedThisMonth": bool(in_window),
     }, None
 
 
@@ -498,9 +395,7 @@ def upsert_bill(bill):
     idx = -1
     bid = str(bill.get("id") or "").strip().lower()
     name = str(bill.get("name") or "").strip().lower()
-    if bid and not bid.startswith("bill_"):
-        bid = ""
-    if bid:
+    if bid.startswith("bill_"):
         for i, existing in enumerate(bills):
             if str(existing.get("id") or "").strip().lower() == bid:
                 idx = i
@@ -511,17 +406,18 @@ def upsert_bill(bill):
                 idx = i
                 break
     if idx >= 0:
-        keep_id = bills[idx].get("id") or bill.get("id") or new_bill_id()
-        keep_due = bills[idx].get("dueDay")
-        keep_src = bills[idx].get("dueSource")
+        keep_id = bills[idx].get("id") or new_bill_id()
+        if bill.get("dueSource") != "override" and bills[idx].get("dueDay"):
+            if bill.get("dueSource") == "default":
+                bill["dueDay"] = bills[idx].get("dueDay")
+                bill["dueSource"] = bills[idx].get("dueSource") or "locked"
+        if not bill.get("amt") and bills[idx].get("amt"):
+            bill["amt"] = bills[idx]["amt"]
         bill["id"] = keep_id
-        if keep_due and bill.get("dueSource") != "override":
-            bill["dueDay"] = keep_due
-            bill["dueSource"] = keep_src or "locked"
         bills[idx] = bill
         save_bills(bills)
         return bill, True
-    if not bill.get("id") or not str(bill.get("id")).startswith("bill_"):
+    if not str(bill.get("id") or "").startswith("bill_"):
         bill["id"] = new_bill_id()
     bills.append(bill)
     save_bills(bills)
@@ -529,62 +425,28 @@ def upsert_bill(bill):
 
 
 def refresh_bill_statuses(bills):
-    if not bills:
-        return bills
-    tx_data, err = fetch_sheet_tab("Transactions")
-    if err or not tx_data:
-        return bills
     now = datetime.now()
     out = []
     for bill in bills:
         if not str(bill.get("id") or "").startswith("bill_"):
             bill["id"] = new_bill_id()
-        cat_id = bill.get("categoryId") or ""
         due_day = int(bill.get("dueDay") or 1)
         start, end = cycle_window(due_day, now)
-        in_window = []
-        latest_amt = None
-        latest_dt = None
-        count = 0
-        for row in tx_data["rows"]:
-            if not txn_matches_cat(row, cat_id):
-                continue
-            dt = parse_txn_date(row.get("Date"))
-            amt = parse_money(row.get("Amount") or row.get("Net Amount"))
-            pending_raw = str(row.get("Is Pending?") or "").strip().lower()
-            count += 1
-            if dt and (latest_dt is None or dt > latest_dt):
-                latest_dt = dt
-                if amt is not None:
-                    latest_amt = abs(amt)
-            if in_cycle(dt, start, end):
-                in_window.append({
-                    "amount": abs(amt) if amt is not None else None,
-                    "pending": pending_raw in ("true", "yes", "1"),
-                    "date": dt,
-                })
         bill["cycleStart"] = start.strftime("%Y-%m-%d")
         bill["cycleEnd"] = end.strftime("%Y-%m-%d")
-        if latest_dt:
-            bill["latestTxnDate"] = latest_dt.strftime("%Y-%m-%d")
-        if in_window:
-            row = in_window[0]
-            bill["st"] = "pend" if row["pending"] else "paid"
-            if row["amount"] is not None:
-                bill["amt"] = row["amount"]
+        if bill.get("st") == "paid":
+            if now >= end:
+                bill["st"] = "pend"
         else:
-            if latest_amt is not None:
-                bill["amt"] = latest_amt
-            bill["st"] = "over" if now >= end else "pend"
-        if count >= 2:
-            bill["type"] = "Recurring"
+            this_due = clamp_due(now.year, now.month, due_day)
+            bill["st"] = "over" if now > this_due else "pend"
         out.append(bill)
     save_bills(out)
     return out
 
 
-def add_monthly_bill(phrase, due_day=None, name=None):
-    bill, err = infer_bill(phrase, display_name=name, due_day_override=due_day)
+def add_monthly_bill(phrase, due_day=None, name=None, amount=None):
+    bill, err = infer_bill(phrase, display_name=name, due_day_override=due_day, amount_override=amount)
     if err:
         return err
     saved, replaced = upsert_bill(bill)
@@ -592,7 +454,6 @@ def add_monthly_bill(phrase, due_day=None, name=None):
         "ok": True,
         "action": "updated" if replaced else "added",
         "bill": saved,
-        "note": "Unique key is bill id / exact name. categoryId is a tag only.",
     }, ensure_ascii=False)
 
 
@@ -609,7 +470,18 @@ def find_bill(bills, key):
     return -1
 
 
-def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name=None):
+def norm_status(val):
+    s = str(val or "").strip().lower()
+    if s in ("paid", "pay", "done"):
+        return "paid"
+    if s in ("over", "overdue", "unpaid", "late"):
+        return "over"
+    if s in ("pend", "pending", "upcoming"):
+        return "pend"
+    return None
+
+
+def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name=None, status=None):
     bills = load_bills()
     i = find_bill(bills, bill_id)
     if i < 0:
@@ -629,6 +501,9 @@ def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name
             pass
     if type_name:
         bills[i]["type"] = "One-Time" if "one" in str(type_name).lower() else "Recurring"
+    st = norm_status(status)
+    if st:
+        bills[i]["st"] = st
     save_bills(bills)
     return json.dumps({"ok": True, "action": "updated", "bill": bills[i]}, ensure_ascii=False)
 
@@ -674,8 +549,7 @@ def web_search(query):
     hits = []
     for m in re.finditer(
         r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-        page,
-        re.I | re.S,
+        page, re.I | re.S,
     ):
         url = html.unescape(m.group(1))
         title = strip_tags(m.group(2))
@@ -693,7 +567,6 @@ def web_search(query):
     lines = ["Search results for %s:" % q]
     for i, (title, url) in enumerate(hits, 1):
         lines.append("%d. %s\n   %s" % (i, title, url))
-    lines.append("Fetch the best links next.")
     return "\n".join(lines)
 
 
@@ -734,21 +607,13 @@ def sc_client_id():
 def nicer_art(url):
     if not url:
         return ""
-    return (
-        url.replace("-large", "-t500x500")
-        .replace("-badge", "-t500x500")
-        .replace("-small", "-t500x500")
-        .replace("-tiny", "-t500x500")
-    )
+    return url.replace("-large", "-t500x500").replace("-badge", "-t500x500").replace("-small", "-t500x500").replace("-tiny", "-t500x500")
 
 
 def sc_oembed(url, fallback_title):
     title, artist, art = fallback_title, "", ""
     try:
-        _, raw = http_get(
-            "https://soundcloud.com/oembed?format=json&url="
-            + urllib.parse.quote(url, safe="")
-        )
+        _, raw = http_get("https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""))
         meta = json.loads(raw)
         title = meta.get("title") or fallback_title
         art = nicer_art(meta.get("thumbnail_url") or "")
@@ -768,12 +633,7 @@ def sc_search(query):
         return {"url": "", "title": "", "artist": "", "art": "", "query": q}
     cid = sc_client_id()
     if cid:
-        api = (
-            "https://api-v2.soundcloud.com/search/tracks?q="
-            + urllib.parse.quote(q)
-            + "&limit=8&client_id="
-            + cid
-        )
+        api = "https://api-v2.soundcloud.com/search/tracks?q=" + urllib.parse.quote(q) + "&limit=8&client_id=" + cid
         try:
             _, raw = http_get(api, timeout=15)
             data = json.loads(raw)
@@ -788,9 +648,7 @@ def sc_search(query):
                 artist = user.get("username") or ""
                 if not art:
                     t2, a2, art2 = sc_oembed(url, title)
-                    art = art2 or art
-                    title = title or t2
-                    artist = artist or a2
+                    art, title, artist = art2 or art, title or t2, artist or a2
                 return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
         except Exception:
             pass
@@ -801,19 +659,12 @@ def yahoo_quote(symbol):
     symbol = (symbol or "").strip().upper()
     if not symbol or not re.match(r"^[A-Z0-9.\-]{1,12}$", symbol):
         return None
-    url = (
-        "https://query1.finance.yahoo.com/v8/finance/chart/"
-        + urllib.parse.quote(symbol)
-        + "?interval=1d&range=1d"
-    )
+    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol) + "?interval=1d&range=1d"
     try:
-        req = urllib.request.Request(
-            url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-                "Accept": "application/json",
-            },
-        )
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/json",
+        })
         with urllib.request.urlopen(req, timeout=8, context=CTX) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         result = (data.get("chart") or {}).get("result") or []
@@ -840,7 +691,7 @@ def run_tool(name, args):
     if name == "read_sheet":
         return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
     if name == "add_monthly_bill":
-        return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"))
+        return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"), args.get("amount"))
     if name == "update_monthly_bill":
         return update_monthly_bill(
             args.get("id", ""),
@@ -848,6 +699,7 @@ def run_tool(name, args):
             args.get("due_day"),
             args.get("amount"),
             args.get("type"),
+            args.get("status"),
         )
     if name == "delete_monthly_bill":
         return delete_monthly_bill(args.get("id", ""))
@@ -863,13 +715,8 @@ def claude(messages, system=SYSTEM):
         "tools": TOOLS,
     }).encode("utf-8")
     req = urllib.request.Request(
-        API_URL,
-        data=payload,
-        headers={
-            "content-type": "application/json",
-            "x-api-key": API_KEY,
-            "anthropic-version": "2023-06-01",
-        },
+        API_URL, data=payload,
+        headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
         method="POST",
     )
     try:
@@ -887,11 +734,7 @@ def claude(messages, system=SYSTEM):
 
 
 def extract_text(content):
-    parts = []
-    for block in content or []:
-        if isinstance(block, dict) and block.get("type") == "text":
-            parts.append(block.get("text") or "")
-    return "".join(parts).strip()
+    return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
 
 
 def clean_block(b):
@@ -907,14 +750,12 @@ def clean_block(b):
         media = (src.get("media_type") or "image/jpeg").split(";")[0].strip()
         if src.get("type") == "base64" and data and media.startswith("image/"):
             return {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}
-        return None
     if kind == "document":
         src = b.get("source") or {}
         data = (src.get("data") or "").strip()
         media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
         if src.get("type") == "base64" and data:
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
-        return None
     return None
 
 
@@ -929,8 +770,7 @@ def clean_messages(raw_msgs):
             continue
         if not isinstance(content, list):
             continue
-        blocks = [clean_block(b) for b in content]
-        blocks = [b for b in blocks if b]
+        blocks = [x for x in (clean_block(b) for b in content) if x]
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
@@ -953,11 +793,7 @@ def chat_with_tools(user_messages, extra=""):
         results = []
         for b in uses:
             out = run_tool(b.get("name"), b.get("input") or {})
-            results.append({
-                "type": "tool_result",
-                "tool_use_id": b.get("id"),
-                "content": out[:20000],
-            })
+            results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
 
@@ -973,19 +809,14 @@ def speak_text(text):
     req = urllib.request.Request(
         "https://api.elevenlabs.io/v1/text-to-speech/" + ELEVEN_VOICE,
         data=payload,
-        headers={
-            "xi-api-key": ELEVEN_KEY,
-            "accept": "audio/mpeg",
-            "content-type": "application/json",
-        },
+        headers={"xi-api-key": ELEVEN_KEY, "accept": "audio/mpeg", "content-type": "application/json"},
         method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
             return resp.read(), None
     except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", errors="replace")
-        return None, err or str(e)
+        return None, e.read().decode("utf-8", errors="replace") or str(e)
     except Exception as e:
         return None, str(e)
 
@@ -1062,22 +893,17 @@ class Handler(SimpleHTTPRequestHandler):
             limit = (qs.get("limit") or ["80"])[0]
             data, err = fetch_sheet_tab(tab)
             if err:
-                code = 400 if err.startswith("Unknown") else 502
-                self._json(code, {"error": err, "tabs": SHEET_TABS})
+                self._json(400 if err.startswith("Unknown") else 502, {"error": err, "tabs": SHEET_TABS})
                 return
             rows = filter_sheet_rows(data["rows"], query, limit)
             self._json(200, {
-                "tab": data["tab"],
-                "headers": data["headers"],
-                "count_total": data["count"],
-                "count_returned": len(rows),
-                "query": query,
-                "rows": rows,
+                "tab": data["tab"], "headers": data["headers"],
+                "count_total": data["count"], "count_returned": len(rows),
+                "query": query, "rows": rows,
             })
             return
         if path == "/api/bills":
-            bills = refresh_bill_statuses(load_bills())
-            self._json(200, {"bills": bills})
+            self._json(200, {"bills": refresh_bill_statuses(load_bills())})
             return
         item = STATIC.get(path)
         if not item:
@@ -1090,9 +916,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         data = fpath.read_bytes()
         if name == "index.html":
-            html_text = data.decode("utf-8", errors="replace")
-            html_text = html_text.replace("__GOOGLE_MAPS_KEY__", MAPS_KEY)
-            data = html_text.encode("utf-8")
+            data = data.decode("utf-8", errors="replace").replace("__GOOGLE_MAPS_KEY__", MAPS_KEY).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(data)))
@@ -1111,8 +935,12 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400, {"error": "Bad JSON"})
                 return
             phrase = (body.get("phrase") or body.get("name") or "").strip()
-            due_day = body.get("due_day") if "due_day" in body else body.get("dueDay")
-            bill, err = infer_bill(phrase, display_name=body.get("displayName"), due_day_override=due_day)
+            bill, err = infer_bill(
+                phrase,
+                display_name=body.get("displayName"),
+                due_day_override=body.get("due_day") if "due_day" in body else body.get("dueDay"),
+                amount_override=body.get("amount") if "amount" in body else body.get("amt"),
+            )
             if err:
                 self._json(400, {"error": err})
                 return
@@ -1131,6 +959,7 @@ class Handler(SimpleHTTPRequestHandler):
                 body.get("due_day") if "due_day" in body else body.get("dueDay"),
                 body.get("amount") if "amount" in body else body.get("amt"),
                 body.get("type"),
+                body.get("status") or body.get("st"),
             )
             try:
                 self._json(200, json.loads(raw))
@@ -1175,18 +1004,11 @@ class Handler(SimpleHTTPRequestHandler):
         loc = body.get("location") or {}
         extra = "\n\n# Live location this turn\n- No GPS this turn. Default to Fort Lauderdale, FL."
         try:
-            lat = float(loc.get("lat"))
-            lng = float(loc.get("lng"))
-            extra = (
-                "\n\n# Live location this turn\n"
-                "- Nick's current Google pin: %.5f, %.5f. "
-                "Use this for near me, weather, traffic, and directions."
-                % (lat, lng)
-            )
+            lat = float(loc.get("lat")); lng = float(loc.get("lng"))
+            extra = "\n\n# Live location this turn\n- Nick's current Google pin: %.5f, %.5f." % (lat, lng)
         except Exception:
             pass
-        text = chat_with_tools(clean, extra)
-        self._json(200, {"text": text, "model": MODEL})
+        self._json(200, {"text": chat_with_tools(clean, extra), "model": MODEL})
 
     def handle_speak(self):
         if not ELEVEN_KEY:
