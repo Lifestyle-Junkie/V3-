@@ -59,6 +59,7 @@ SHEET_TABS = [
     "Investment Transactions",
 ]
 BILLS_FILE = DIR / "hope-bills.json"
+HOLDINGS_FILE = DIR / "hope-holdings.json"
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
@@ -67,12 +68,13 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Context
 - Today is Wednesday, September 23, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time).
-- Tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
+- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
 - Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
-- update_monthly_bill: change name, amount, due_day, type, or status (paid/upcoming/unpaid) by bill id or exact name.
+- update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
 - delete_monthly_bill: by id or exact name.
-- read_sheet: only when Nick asks about accounts, transactions, holdings, or other sheet data.
+- read_capital: use this when Nick asks about the Capital screen, monthly bills, or ticker holdings. It is the live Holdings + Bills list from the app.
+- read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 # Output style
 Short, direct. Include sir once. Live facts from tools only.
 Always end live answers with:
@@ -102,7 +104,7 @@ TOOLS = [
     },
     {
         "name": "read_sheet",
-        "description": "Read a finance sheet tab. Never use this for monthly bills.",
+        "description": "Read a finance sheet tab. Never use this for monthly bills or the Capital holdings list.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -112,6 +114,11 @@ TOOLS = [
             },
             "required": ["tab"],
         },
+    },
+    {
+        "name": "read_capital",
+        "description": "See Nick's Capital screen: monthly bills, ticker holdings with live prices, and Robinhood total.",
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "add_monthly_bill",
@@ -129,7 +136,7 @@ TOOLS = [
     },
     {
         "name": "update_monthly_bill",
-        "description": "Update a bill by id or exact name. Fields: name, due_day, amount, type, status.",
+        "description": "Update a bill by id or exact name.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -319,7 +326,37 @@ def load_bills():
 
 
 def save_bills(bills):
+    if not isinstance(bills, list):
+        return
     BILLS_FILE.write_text(json.dumps(bills, indent=2), encoding="utf-8")
+
+
+def load_holdings():
+    if not HOLDINGS_FILE.exists():
+        return []
+    try:
+        data = json.loads(HOLDINGS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_holdings(rows):
+    HOLDINGS_FILE.write_text(json.dumps(rows, indent=2), encoding="utf-8")
+
+
+def read_capital():
+    bills = load_bills()
+    holds = load_holdings()
+    rh = None
+    acc, err = fetch_sheet_tab("Accounts")
+    if not err:
+        rh = robinhood_from_accounts(acc["rows"])
+    return json.dumps({
+        "robinhood": rh,
+        "bills": bills,
+        "holdings": holds,
+    }, ensure_ascii=False)
 
 
 def new_bill_id():
@@ -425,6 +462,8 @@ def upsert_bill(bill):
 
 
 def refresh_bill_statuses(bills):
+    if not bills:
+        return bills
     now = datetime.now()
     out = []
     for bill in bills:
@@ -690,6 +729,8 @@ def run_tool(name, args):
         return web_fetch(args.get("url", ""), args.get("prompt", ""))
     if name == "read_sheet":
         return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
+    if name == "read_capital":
+        return read_capital()
     if name == "add_monthly_bill":
         return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"), args.get("amount"))
     if name == "update_monthly_bill":
@@ -903,7 +944,13 @@ class Handler(SimpleHTTPRequestHandler):
             })
             return
         if path == "/api/bills":
-            self._json(200, {"bills": refresh_bill_statuses(load_bills())})
+            bills = load_bills()
+            if bills:
+                bills = refresh_bill_statuses(bills)
+            self._json(200, {"bills": bills})
+            return
+        if path == "/api/holdings":
+            self._json(200, {"holdings": load_holdings()})
             return
         item = STATIC.get(path)
         if not item:
@@ -927,6 +974,27 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
+            return
+        if self.path == "/api/holdings":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            rows = body.get("holdings") if isinstance(body.get("holdings"), list) else []
+            clean = []
+            for h in rows:
+                t = str((h or {}).get("t") or "").strip().upper()
+                if not t:
+                    continue
+                clean.append({
+                    "t": t,
+                    "name": (h or {}).get("name") or t,
+                    "price": (h or {}).get("price"),
+                    "chg": (h or {}).get("chg") or 0,
+                })
+            save_holdings(clean)
+            self._json(200, {"ok": True, "holdings": clean})
             return
         if self.path == "/api/bills":
             try:
