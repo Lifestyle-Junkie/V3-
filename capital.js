@@ -1,5 +1,4 @@
 /* ── Capital HUD ─────────────────────────────────────────────────────── */
-
 const CAP_MONTHS = [
   { m: "Apr", v: 2000, ok: true },
   { m: "May", v: 2200, ok: true },
@@ -8,40 +7,33 @@ const CAP_MONTHS = [
   { m: "Aug", v: 1500, ok: false },
   { m: "Sep", v: 1500, ok: false }
 ];
-
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
-
 const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
-
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
 let CAP_BILLS = [];
 let holdings = [];
-
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
 }
-
 function parseMoney(str) {
   if (str == null) return NaN;
   const cleaned = String(str).replace(/[^0-9.\-]/g, "");
   return Number(cleaned);
 }
-
 function getCashFromDom() {
   const el = document.getElementById("capCashVal");
   if (!el) return liveCash;
   const n = parseMoney(el.textContent);
   return isFinite(n) ? n : liveCash;
 }
-
 function updateNetWorthUI(rh, cash) {
   const net = rh + cash;
   const rhEl = document.getElementById("capRhVal");
@@ -52,14 +44,12 @@ function updateNetWorthUI(rh, cash) {
   if (pieEl) pieEl.textContent = money(net);
   renderAlloc(rh, cash, net);
 }
-
 function parseCsvLine(line) {
   const cols = line.match(/(".*?"|[^,]*)/g) || [];
   return cols.map(function (c) {
     return c.replace(/^"|"$/g, "").replace(/""/g, '"').trim();
   });
 }
-
 /* ── Robinhood individual only ───────────────────────────────────────── */
 async function fetchRobinhoodTotal() {
   try {
@@ -73,7 +63,6 @@ async function fetchRobinhoodTotal() {
       }
     }
   } catch (err) {}
-
   try {
     const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -111,19 +100,26 @@ async function fetchRobinhoodTotal() {
     console.warn("[capital] Sheets RH fetch failed:", err);
   }
 }
-
 function startLiveSync() {
   fetchRobinhoodTotal();
   setInterval(fetchRobinhoodTotal, 60000);
 }
-
-/* ── Bills from Hope backend (sheet-inferred) ────────────────────────── */
-function dueLabel(dueDay) {
-  const d = Number(dueDay) || 1;
+/* ── Bills from Hope backend (cycle window) ──────────────────────────── */
+function dueLabel(bill) {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-  return months[new Date().getMonth()] + " " + d;
+  const iso = bill && bill.cycleEnd;
+  if (iso) {
+    const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
+    if (!isNaN(d.getTime())) return months[d.getMonth()] + " " + d.getDate();
+  }
+  const n = Number(bill && bill.dueDay != null ? bill.dueDay : bill) || 1;
+  return months[new Date().getMonth()] + " " + n;
 }
-
+function statusLabel(st) {
+  if (st === "paid") return "Paid";
+  if (st === "over") return "Unpaid";
+  return "Upcoming";
+}
 async function fetchBillsFromServer() {
   try {
     const res = await fetch("/api/bills?_=" + Date.now(), { cache: "no-store" });
@@ -136,7 +132,6 @@ async function fetchBillsFromServer() {
     renderBills();
   }
 }
-
 function addBillViaEdit() {
   const phrase = prompt("Bill to add (e.g. car note)");
   if (phrase == null) return;
@@ -164,12 +159,10 @@ function addBillViaEdit() {
       alert("Could not add bill");
     });
 }
-
 function startBillSync() {
   fetchBillsFromServer();
   setInterval(fetchBillsFromServer, 20000);
 }
-
 function ensureBillEditButton() {
   let btn = document.getElementById("capBillEdit");
   if (btn) {
@@ -201,7 +194,6 @@ function ensureBillEditButton() {
     head.appendChild(btn);
   }
 }
-
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
@@ -217,14 +209,13 @@ function renderBills() {
       "</div>" +
       CAP_BILLS.map(function (b) {
         total += Number(b.amt) || 0;
-        const label = b.st === "paid" ? "Paid" : b.st === "over" ? "Overdue" : "Pending";
         return (
           '<div class="cap-bill">' +
             "<span>" + b.name + "</span>" +
             "<span>" + money(b.amt) + "</span>" +
-            "<span>" + dueLabel(b.dueDay) + "</span>" +
+            "<span>" + dueLabel(b) + "</span>" +
             "<span>" + (b.type || "Recurring") + "</span>" +
-            '<span class="st ' + b.st + '">' + label + "</span>" +
+            '<span class="st ' + b.st + '">' + statusLabel(b.st) + "</span>" +
           "</div>"
         );
       }).join("");
@@ -232,18 +223,15 @@ function renderBills() {
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
 }
-
 /* ── Interactive tickers ─────────────────────────────────────────────── */
 function logoUrl(ticker) {
   return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
 }
-
 function sparkHtml() {
   let html = '<span class="cap-spark"><span class="candle-chart">';
   for (let i = 0; i < 12; i++) html += '<span class="candle"></span>';
   return html + "</span></span>";
 }
-
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
@@ -333,7 +321,6 @@ function renderHolds() {
     });
   });
 }
-
 function addTicker(symbol) {
   const t = symbol.toUpperCase();
   if (holdings.some(function (h) { return h.t === t; })) return;
@@ -341,13 +328,11 @@ function addTicker(symbol) {
   renderHolds();
   fetchQuotes();
 }
-
 function removeTicker(symbol) {
   const t = symbol.toUpperCase();
   holdings = holdings.filter(function (h) { return h.t !== t; });
   renderHolds();
 }
-
 async function fetchQuotes() {
   if (!holdings.length) return;
   const results = await Promise.all(
@@ -382,12 +367,10 @@ async function fetchQuotes() {
   });
   if (changed) renderHolds();
 }
-
 function startQuoteSync() {
   fetchQuotes();
   setInterval(fetchQuotes, 60000);
 }
-
 /* ── Chart / alloc / months / insights ───────────────────────────────── */
 function drawCapChart() {
   const el = document.getElementById("capChart");
@@ -411,7 +394,6 @@ function drawCapChart() {
     '<circle cx="' + lx + '" cy="' + ly + '" r="4" fill="#3ee07a"/>' +
     "</svg>";
 }
-
 function renderAlloc(rh, cash, net) {
   const el = document.getElementById("capAlloc");
   if (!el) return;
@@ -429,7 +411,6 @@ function renderAlloc(rh, cash, net) {
       "<div><i class='cash'></i>Cash " + cashPct + "%<b>" + money(cash) + "</b></div>" +
     "</div>";
 }
-
 function renderMonths() {
   const box = document.getElementById("capMonths");
   if (!box) return;
@@ -442,7 +423,6 @@ function renderMonths() {
     );
   }).join("");
 }
-
 function renderInsights() {
   const box = document.getElementById("capInsights");
   if (!box) return;
@@ -463,7 +443,6 @@ function renderInsights() {
     );
   }).join("");
 }
-
 /* ── Boot ────────────────────────────────────────────────────────────── */
 function bootCapital() {
   drawCapChart();
@@ -472,7 +451,6 @@ function bootCapital() {
   renderBills();
   renderMonths();
   renderInsights();
-
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll("[data-cap-tab]").forEach(function (b) {
@@ -481,7 +459,6 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
-
   document.querySelectorAll(".cap-ranges button").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll(".cap-ranges button").forEach(function (b) {
@@ -490,7 +467,6 @@ function bootCapital() {
       btn.classList.add("on");
     });
   });
-
   const cashBtn = document.getElementById("capCashEdit");
   if (cashBtn) {
     cashBtn.addEventListener("click", function () {
@@ -505,12 +481,10 @@ function bootCapital() {
       updateNetWorthUI(liveRhTotal, n);
     });
   }
-
   startLiveSync();
   startQuoteSync();
   startBillSync();
 }
-
 function goToCapitalTab() {
   document.querySelectorAll(".nav-item").forEach(function (i) {
     i.classList.remove("active");
@@ -523,7 +497,6 @@ function goToCapitalTab() {
     layout.classList.add("capital-mode");
   }
 }
-
 if (document.readyState === "loading") {
   document.addEventListener("DOMContentLoaded", bootCapital);
 } else {
