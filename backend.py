@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
+import calendar
 import csv
 import html
 import io
@@ -83,7 +84,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
 - You have live tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
-- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with the phrase. Do NOT ask amount, category ID, or type. Due day is the day-of-month of the MOST RECENT matching transaction (e.g. Ford Credit Sep 15 → due day 15), not an average. Only pass due_day if Nick explicitly gives a day.
+- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with the phrase. Do NOT ask amount, category ID, or type. dueDay is a fixed day-of-month. Status is Paid only if a matching transaction falls in the current cycle (last dueDay → next dueDay). Display due date is the next cycle end, not the last payment date. Only pass due_day if Nick explicitly gives a day.
 - update_monthly_bill / delete_monthly_bill: change or remove an existing bill by name or categoryId.
 - read_sheet: live Accounts / Transactions / Holdings / Categories.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
@@ -139,12 +140,12 @@ TOOLS = [
     },
     {
         "name": "add_monthly_bill",
-        "description": "Add or upsert a monthly bill from a short phrase. Due day = latest matching transaction day unless due_day is passed.",
+        "description": "Add or upsert a monthly bill from a short phrase. dueDay is fixed. Status uses the current dueDay cycle window, not any historical payment.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "phrase": {"type": "string"},
-                "due_day": {"type": "integer", "description": "Optional 1–31 override"},
+                "due_day": {"type": "integer", "description": "Optional 1–31 override; locked after set"},
                 "name": {"type": "string"},
             },
             "required": ["phrase"],
@@ -321,6 +322,34 @@ def parse_txn_date(val):
         return None
 
 
+def clamp_due(year, month, due_day):
+    last = calendar.monthrange(year, month)[1]
+    return datetime(year, month, min(max(1, int(due_day or 1)), last))
+
+
+def cycle_window(due_day, today=None):
+    today = today or datetime.now()
+    due_day = max(1, min(31, int(due_day or 1)))
+    this_due = clamp_due(today.year, today.month, due_day)
+    if today >= this_due:
+        start = this_due
+        if today.month == 12:
+            end = clamp_due(today.year + 1, 1, due_day)
+        else:
+            end = clamp_due(today.year, today.month + 1, due_day)
+    else:
+        if today.month == 1:
+            start = clamp_due(today.year - 1, 12, due_day)
+        else:
+            start = clamp_due(today.year, today.month - 1, due_day)
+        end = this_due
+    return start, end
+
+
+def in_cycle(dt, start, end):
+    return dt is not None and start <= dt < end
+
+
 def load_bills():
     if not BILLS_FILE.exists():
         return []
@@ -371,6 +400,17 @@ def txn_matches_cat(row, cat_id):
     return str(row.get("Category ID") or "").strip().upper() == str(cat_id or "").strip().upper()
 
 
+def existing_due_day(cat_id):
+    key = str(cat_id or "").lower()
+    if not key:
+        return None
+    for bill in load_bills():
+        ek = str(bill.get("categoryId") or bill.get("id") or "").lower()
+        if ek == key and bill.get("dueDay"):
+            return int(bill.get("dueDay"))
+    return None
+
+
 def infer_bill(phrase, display_name=None, due_day_override=None):
     phrase = (phrase or "").strip()
     if not phrase:
@@ -388,49 +428,51 @@ def infer_bill(phrase, display_name=None, due_day_override=None):
     cat_name = str(cat.get("Name") or phrase).strip()
     now = datetime.now()
     matched = []
-    this_month = []
     for row in tx_data["rows"]:
         if not txn_matches_cat(row, cat_id):
             continue
         dt = parse_txn_date(row.get("Date"))
         amt = parse_money(row.get("Amount") or row.get("Net Amount"))
         pending_raw = str(row.get("Is Pending?") or "").strip().lower()
-        item = {
+        matched.append({
             "date": dt,
             "amount": abs(amt) if amt is not None else None,
             "pending": pending_raw in ("true", "yes", "1"),
             "summary": row.get("Summary") or row.get("Original Description") or "",
-        }
-        matched.append(item)
-        if dt and dt.month == now.month and dt.year == now.year:
-            this_month.append(item)
+        })
 
     dated = [x for x in matched if x["date"]]
     dated.sort(key=lambda r: r["date"], reverse=True)
     latest = dated[0] if dated else None
 
+    locked = existing_due_day(cat_id)
     if due_day_override is not None:
         try:
             due_day = max(1, min(31, int(due_day_override)))
             due_source = "override"
         except Exception:
-            due_day = latest["date"].day if latest else 1
-            due_source = "latest_txn" if latest else "default"
+            due_day = locked or (latest["date"].day if latest else 1)
+            due_source = "locked" if locked else "seed"
+    elif locked:
+        due_day = locked
+        due_source = "locked"
     elif latest:
         due_day = latest["date"].day
-        due_source = "latest_txn"
+        due_source = "seed"
     else:
         due_day = 1
         due_source = "default"
 
+    start, end = cycle_window(due_day, now)
+    in_window = [x for x in dated if in_cycle(x["date"], start, end)]
     amt = latest["amount"] if latest and latest["amount"] is not None else 0
-    paid_row = next((x for x in this_month if x["amount"] is not None), None)
-    if paid_row:
-        st = "pend" if paid_row["pending"] else "paid"
-        if paid_row["amount"] is not None:
-            amt = paid_row["amount"]
+    if in_window:
+        hit = in_window[0]
+        if hit["amount"] is not None:
+            amt = hit["amount"]
+        st = "pend" if hit["pending"] else "paid"
     else:
-        st = "over" if now.day > due_day else "pend"
+        st = "over" if now >= end else "pend"
 
     label = (display_name or phrase).strip()
     if phrase.lower() in ("car note", "car loan", "ford", "ford credit"):
@@ -440,20 +482,21 @@ def infer_bill(phrase, display_name=None, due_day_override=None):
     else:
         label = label.title()
 
-    bill = {
+    return {
         "id": cat_id or re.sub(r"[^a-z0-9]+", "-", phrase.lower()).strip("-"),
         "name": label,
         "amt": amt,
         "dueDay": due_day,
         "dueSource": due_source,
+        "cycleStart": start.strftime("%Y-%m-%d"),
+        "cycleEnd": end.strftime("%Y-%m-%d"),
         "latestTxnDate": latest["date"].strftime("%Y-%m-%d") if latest else "",
         "type": "Recurring" if len(dated) >= 2 else "One-Time",
         "categoryId": cat_id,
         "categoryName": cat_name,
         "st": st,
-        "matchedThisMonth": bool(this_month),
-    }
-    return bill, None
+        "matchedThisMonth": bool(in_window),
+    }, None
 
 
 def upsert_bill(bill):
@@ -463,9 +506,9 @@ def upsert_bill(bill):
     for i, existing in enumerate(bills):
         ek = (existing.get("categoryId") or existing.get("id") or "").lower()
         if ek and ek == key:
-            if existing.get("dueSource") == "override" and bill.get("dueSource") != "override":
+            if existing.get("dueDay") and bill.get("dueSource") not in ("override",):
                 bill["dueDay"] = existing.get("dueDay")
-                bill["dueSource"] = "override"
+                bill["dueSource"] = existing.get("dueSource") or "locked"
             bills[i] = bill
             replaced = True
             break
@@ -485,9 +528,11 @@ def refresh_bill_statuses(bills):
     out = []
     for bill in bills:
         cat_id = bill.get("categoryId") or ""
-        this_month = []
-        latest_dt = None
+        due_day = int(bill.get("dueDay") or 1)
+        start, end = cycle_window(due_day, now)
+        in_window = []
         latest_amt = None
+        latest_dt = None
         count = 0
         for row in tx_data["rows"]:
             if not txn_matches_cat(row, cat_id):
@@ -500,25 +545,25 @@ def refresh_bill_statuses(bills):
                 latest_dt = dt
                 if amt is not None:
                     latest_amt = abs(amt)
-            if dt and dt.month == now.month and dt.year == now.year:
-                this_month.append({
+            if in_cycle(dt, start, end):
+                in_window.append({
                     "amount": abs(amt) if amt is not None else None,
                     "pending": pending_raw in ("true", "yes", "1"),
+                    "date": dt,
                 })
-        if bill.get("dueSource") != "override" and latest_dt:
-            bill["dueDay"] = latest_dt.day
-            bill["dueSource"] = "latest_txn"
+        bill["cycleStart"] = start.strftime("%Y-%m-%d")
+        bill["cycleEnd"] = end.strftime("%Y-%m-%d")
+        if latest_dt:
             bill["latestTxnDate"] = latest_dt.strftime("%Y-%m-%d")
-        due_day = int(bill.get("dueDay") or 1)
-        if this_month:
-            row = this_month[0]
+        if in_window:
+            row = in_window[0]
             bill["st"] = "pend" if row["pending"] else "paid"
             if row["amount"] is not None:
                 bill["amt"] = row["amount"]
         else:
             if latest_amt is not None:
                 bill["amt"] = latest_amt
-            bill["st"] = "over" if now.day > due_day else "pend"
+            bill["st"] = "over" if now >= end else "pend"
         if count >= 2:
             bill["type"] = "Recurring"
         out.append(bill)
@@ -535,7 +580,7 @@ def add_monthly_bill(phrase, due_day=None, name=None):
         "ok": True,
         "action": "updated" if replaced else "added",
         "bill": saved,
-        "note": "Due day is the latest matching transaction day unless overridden.",
+        "note": "dueDay is fixed. Status is Paid only if a txn is in the current cycle window.",
     }, ensure_ascii=False)
 
 
