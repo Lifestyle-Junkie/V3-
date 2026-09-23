@@ -15,11 +15,9 @@ import urllib.request
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
-
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
     "/index.html": ("index.html", "text/html; charset=utf-8"),
@@ -33,7 +31,6 @@ STATIC = {
     "/voice.js": ("voice.js", "application/javascript; charset=utf-8"),
     "/capital.js": ("capital.js", "application/javascript; charset=utf-8"),
 }
-
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
 ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
@@ -43,7 +40,6 @@ API_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
-
 SHEET_ID = os.environ.get(
     "HOPE_SHEET_ID",
     "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk",
@@ -61,7 +57,7 @@ SHEET_TABS = [
 BILLS_FILE = DIR / "hope-bills.json"
 HOLDINGS_FILE = DIR / "hope-holdings.json"
 CASH_FILE = DIR / "hope-cash.json"
-
+CHAT_FILE = DIR / "hope-chat.json"
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
@@ -76,6 +72,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - delete_monthly_bill: by id or exact name.
 - read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings. Use this whenever Nick asks about money on Capital.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
+- Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
 # Output style
 Short, direct. Include sir once. Live facts from tools only.
 Always end live answers with:
@@ -83,7 +80,6 @@ Sources:
 - [Title](URL)
 Spoken replies: short, no markdown sources.
 """
-
 TOOLS = [
     {
         "name": "web_search",
@@ -161,8 +157,6 @@ TOOLS = [
         },
     },
 ]
-
-
 def http_get(url, timeout=20, data=None, headers=None):
     h = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HopeV3/1.0",
@@ -185,8 +179,6 @@ def http_get(url, timeout=20, data=None, headers=None):
     except LookupError:
         text = raw.decode("utf-8", errors="replace")
     return final, text
-
-
 def strip_tags(text):
     text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
     text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
@@ -197,8 +189,6 @@ def strip_tags(text):
     text = re.sub(r"[ \t]+", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
-
-
 def parse_csv_text(csv_text):
     rows = []
     reader = csv.reader(io.StringIO(csv_text))
@@ -217,8 +207,6 @@ def parse_csv_text(csv_text):
             item[key] = raw[i] if i < len(raw) else ""
         out.append(item)
     return headers, out
-
-
 def resolve_tab(name):
     raw = (name or "").strip()
     if not raw:
@@ -227,8 +215,6 @@ def resolve_tab(name):
         if tab.lower() == raw.lower():
             return tab
     return None
-
-
 def fetch_sheet_tab(tab):
     tab = resolve_tab(tab)
     if not tab:
@@ -249,8 +235,6 @@ def fetch_sheet_tab(tab):
         return None, "Sheet not shared as Anyone with the link (Viewer)."
     headers, rows = parse_csv_text(text)
     return {"tab": tab, "headers": headers, "rows": rows, "count": len(rows)}, None
-
-
 def filter_sheet_rows(rows, query, limit):
     q = (query or "").strip().lower()
     out = rows
@@ -267,8 +251,6 @@ def filter_sheet_rows(rows, query, limit):
         limit = 80
     limit = max(1, min(limit, 250))
     return out[:limit]
-
-
 def read_sheet(tab, query="", limit=80):
     data, err = fetch_sheet_tab(tab)
     if err:
@@ -282,21 +264,15 @@ def read_sheet(tab, query="", limit=80):
         "query": query or "",
         "rows": rows,
     }, ensure_ascii=False)
-
-
 def parse_money(val):
     cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
     try:
         return float(cleaned) if cleaned else None
     except Exception:
         return None
-
-
 def clamp_due(year, month, due_day):
     last = calendar.monthrange(year, month)[1]
     return datetime(year, month, min(max(1, int(due_day or 1)), last))
-
-
 def cycle_window(due_day, today=None):
     today = today or datetime.now()
     due_day = max(1, min(31, int(due_day or 1)))
@@ -314,8 +290,6 @@ def cycle_window(due_day, today=None):
             start = clamp_due(today.year, today.month - 1, due_day)
         end = this_due
     return start, end
-
-
 def load_bills():
     if not BILLS_FILE.exists():
         return []
@@ -324,14 +298,10 @@ def load_bills():
         return data if isinstance(data, list) else []
     except Exception:
         return []
-
-
 def save_bills(bills):
     if not isinstance(bills, list):
         return
     BILLS_FILE.write_text(json.dumps(bills, indent=2), encoding="utf-8")
-
-
 def load_holdings():
     if not HOLDINGS_FILE.exists():
         return []
@@ -340,12 +310,8 @@ def load_holdings():
         return data if isinstance(data, list) else []
     except Exception:
         return []
-
-
 def save_holdings(rows):
     HOLDINGS_FILE.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-
-
 def load_cash():
     if not CASH_FILE.exists():
         return 2500.0
@@ -355,12 +321,31 @@ def load_cash():
         return n if n == n else 2500.0
     except Exception:
         return 2500.0
-
-
 def save_cash(n):
     CASH_FILE.write_text(json.dumps({"cash": float(n)}, indent=2), encoding="utf-8")
-
-
+def load_chat():
+    if not CHAT_FILE.exists():
+        return {"topics": [], "currentId": 1, "nextId": 2}
+    try:
+        data = json.loads(CHAT_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return {"topics": [], "currentId": 1, "nextId": 2}
+        topics = data.get("topics") if isinstance(data.get("topics"), list) else []
+        return {
+            "topics": topics,
+            "currentId": data.get("currentId") or 1,
+            "nextId": data.get("nextId") or 2,
+        }
+    except Exception:
+        return {"topics": [], "currentId": 1, "nextId": 2}
+def save_chat(data):
+    if not isinstance(data, dict):
+        return
+    CHAT_FILE.write_text(json.dumps({
+        "topics": data.get("topics") if isinstance(data.get("topics"), list) else [],
+        "currentId": data.get("currentId") or 1,
+        "nextId": data.get("nextId") or 2,
+    }, indent=2), encoding="utf-8")
 def read_capital():
     bills = load_bills()
     holds = load_holdings()
@@ -378,15 +363,11 @@ def read_capital():
         "monthly_bills": bills,
         "holdings": holds,
     }, ensure_ascii=False)
-
-
 def new_bill_id():
     return "bill_%s_%04d" % (
         datetime.now().strftime("%Y%m%d%H%M%S"),
         int(time.time() * 1000) % 10000,
     )
-
-
 def parse_due_day(text):
     t = (text or "").lower()
     m = re.search(r"\bdue(?:\s+on)?(?:\s+the)?\s+(\d{1,2})(?:st|nd|rd|th)?\b", t)
@@ -396,15 +377,11 @@ def parse_due_day(text):
     if m:
         return max(1, min(31, int(m.group(1))))
     return None
-
-
 def parse_amount(text):
     m = re.search(r"\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d+)", text or "")
     if not m:
         return None
     return parse_money(m.group(1))
-
-
 def parse_bill_name(text, amount=None):
     t = (text or "").strip()
     t = re.sub(r"(?i)\b(add|update|monthly\s+bill|bill)\b", " ", t)
@@ -415,8 +392,6 @@ def parse_bill_name(text, amount=None):
         t = re.sub(r"\$?\s*" + re.escape("%.2f" % amount), " ", t)
     t = re.sub(r"\s+", " ", t).strip(" -")
     return t.title() if t else "Bill"
-
-
 def infer_bill(phrase, display_name=None, due_day_override=None, amount_override=None):
     phrase = (phrase or "").strip()
     if not phrase:
@@ -446,8 +421,6 @@ def infer_bill(phrase, display_name=None, due_day_override=None, amount_override
         "type": "Recurring",
         "st": st,
     }, None
-
-
 def upsert_bill(bill):
     bills = load_bills()
     idx = -1
@@ -480,8 +453,6 @@ def upsert_bill(bill):
     bills.append(bill)
     save_bills(bills)
     return bill, False
-
-
 def refresh_bill_statuses(bills):
     if not bills:
         return bills
@@ -503,8 +474,6 @@ def refresh_bill_statuses(bills):
         out.append(bill)
     save_bills(out)
     return out
-
-
 def add_monthly_bill(phrase, due_day=None, name=None, amount=None):
     bill, err = infer_bill(phrase, display_name=name, due_day_override=due_day, amount_override=amount)
     if err:
@@ -515,8 +484,6 @@ def add_monthly_bill(phrase, due_day=None, name=None, amount=None):
         "action": "updated" if replaced else "added",
         "bill": saved,
     }, ensure_ascii=False)
-
-
 def find_bill(bills, key):
     k = str(key or "").strip().lower()
     if not k:
@@ -528,8 +495,6 @@ def find_bill(bills, key):
         if str(b.get("name") or "").strip().lower() == k:
             return i
     return -1
-
-
 def norm_status(val):
     s = str(val or "").strip().lower()
     if s in ("paid", "pay", "done"):
@@ -539,8 +504,6 @@ def norm_status(val):
     if s in ("pend", "pending", "upcoming"):
         return "pend"
     return None
-
-
 def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name=None, status=None):
     bills = load_bills()
     i = find_bill(bills, bill_id)
@@ -566,8 +529,6 @@ def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name
         bills[i]["st"] = st
     save_bills(bills)
     return json.dumps({"ok": True, "action": "updated", "bill": bills[i]}, ensure_ascii=False)
-
-
 def delete_monthly_bill(bill_id):
     bills = load_bills()
     i = find_bill(bills, bill_id)
@@ -576,8 +537,6 @@ def delete_monthly_bill(bill_id):
     removed = bills.pop(i)
     save_bills(bills)
     return json.dumps({"ok": True, "action": "deleted", "bill": removed}, ensure_ascii=False)
-
-
 def robinhood_from_accounts(rows):
     found = None
     for row in rows:
@@ -591,8 +550,6 @@ def robinhood_from_accounts(rows):
         if found is None and ("robinhood" in name or bank == "robinhood"):
             found = bal
     return found
-
-
 def web_search(query):
     q = (query or "").strip()
     if not q:
@@ -628,8 +585,6 @@ def web_search(query):
     for i, (title, url) in enumerate(hits, 1):
         lines.append("%d. %s\n   %s" % (i, title, url))
     return "\n".join(lines)
-
-
 def web_fetch(url, prompt=""):
     url = (url or "").strip()
     if not url.startswith("http"):
@@ -641,8 +596,6 @@ def web_fetch(url, prompt=""):
     text = strip_tags(page)[:12000]
     note = "Focus: %s\n" % prompt if prompt else ""
     return "%sURL: %s\n\n%s" % (note, final, text or "(no text)")
-
-
 def sc_client_id():
     if _SC_CLIENT["id"] and time.time() - _SC_CLIENT["t"] < 3600:
         return _SC_CLIENT["id"]
@@ -662,14 +615,10 @@ def sc_client_id():
     except Exception:
         pass
     return _SC_CLIENT["id"]
-
-
 def nicer_art(url):
     if not url:
         return ""
     return url.replace("-large", "-t500x500").replace("-badge", "-t500x500").replace("-small", "-t500x500").replace("-tiny", "-t500x500")
-
-
 def sc_oembed(url, fallback_title):
     title, artist, art = fallback_title, "", ""
     try:
@@ -685,8 +634,6 @@ def sc_oembed(url, fallback_title):
     except Exception:
         pass
     return title, artist, art
-
-
 def sc_search(query):
     q = (query or "").strip()
     if len(q) < 2:
@@ -713,8 +660,6 @@ def sc_search(query):
         except Exception:
             pass
     return {"url": "", "title": q, "artist": "", "art": "", "query": q}
-
-
 def yahoo_quote(symbol):
     symbol = (symbol or "").strip().upper()
     if not symbol or not re.match(r"^[A-Z0-9.\-]{1,12}$", symbol):
@@ -741,8 +686,6 @@ def yahoo_quote(symbol):
     except Exception as e:
         print("[quote] failed for %s: %s" % (symbol, e))
         return None
-
-
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
@@ -766,8 +709,6 @@ def run_tool(name, args):
     if name == "delete_monthly_bill":
         return delete_monthly_bill(args.get("id", ""))
     return "Unknown tool: %s" % name
-
-
 def claude(messages, system=SYSTEM):
     payload = json.dumps({
         "model": MODEL,
@@ -793,12 +734,8 @@ def claude(messages, system=SYSTEM):
         return None, msg
     except Exception as e:
         return None, str(e)
-
-
 def extract_text(content):
     return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
-
-
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -819,8 +756,6 @@ def clean_block(b):
         if src.get("type") == "base64" and data:
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
     return None
-
-
 def clean_messages(raw_msgs):
     clean = []
     for m in raw_msgs:
@@ -836,8 +771,6 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
-
-
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -858,8 +791,6 @@ def chat_with_tools(user_messages, extra=""):
             results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
-
-
 def speak_text(text):
     if not ELEVEN_KEY:
         return None, "ELEVENLABS_API_KEY is not set"
@@ -881,12 +812,9 @@ def speak_text(text):
         return None, e.read().decode("utf-8", errors="replace") or str(e)
     except Exception as e:
         return None, str(e)
-
-
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
-
     def _json(self, code, obj):
         raw = json.dumps(obj).encode("utf-8")
         self.send_response(code)
@@ -896,13 +824,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
         self.wfile.write(raw)
-
     def _read_json_body(self):
         length = int(self.headers.get("Content-Length", "0"))
         if length <= 0:
             return {}
         return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
-
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/config.js":
@@ -976,6 +902,9 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/cash":
             self._json(200, {"cash": load_cash()})
             return
+        if path == "/api/chat/history":
+            self._json(200, load_chat())
+            return
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
@@ -994,7 +923,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
-
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
@@ -1083,6 +1011,20 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception:
                 self._json(404, {"error": raw})
             return
+        if self.path == "/api/chat/history":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            topics = body.get("topics") if isinstance(body.get("topics"), list) else []
+            save_chat({
+                "topics": topics,
+                "currentId": body.get("currentId") or 1,
+                "nextId": body.get("nextId") or 2,
+            })
+            self._json(200, {"ok": True, "topics": len(topics)})
+            return
         if self.path != "/api/chat":
             self.send_error(404)
             return
@@ -1114,7 +1056,6 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception:
             pass
         self._json(200, {"text": chat_with_tools(clean, extra), "model": MODEL})
-
     def handle_speak(self):
         if not ELEVEN_KEY:
             self._json(500, {"error": "ELEVENLABS_API_KEY is not set"})
@@ -1140,8 +1081,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(audio)
-
-
 if __name__ == "__main__":
     for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
         if not (DIR / name).exists():
