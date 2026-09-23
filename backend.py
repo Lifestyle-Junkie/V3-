@@ -11,13 +11,14 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from statistics import median
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
-HTML_FILE = DIR / "index.html"
 
 STATIC = {
     "/": ("index.html", "text/html; charset=utf-8"),
@@ -43,7 +44,6 @@ MAX_TOOL_ROUNDS = 8
 CTX = ssl.create_default_context()
 _SC_CLIENT = {"id": "", "t": 0}
 
-# Nick's live finance workbook (Anyone-with-link Viewer)
 SHEET_ID = os.environ.get(
     "HOPE_SHEET_ID",
     "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk",
@@ -58,6 +58,20 @@ SHEET_TABS = [
     "Holdings",
     "Investment Transactions",
 ]
+BILLS_FILE = DIR / "hope-bills.json"
+
+ALIASES = {
+    "car note": "car payment",
+    "car note payment": "car payment",
+    "car loan": "car payment",
+    "ford": "car payment",
+    "ford credit": "car payment",
+    "auto loan": "car payment",
+    "phone bill": "mobile phone",
+    "cell": "mobile phone",
+    "rent": "rent",
+    "insurance": "auto insurance",
+}
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
@@ -70,87 +84,69 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Today is Thursday, September 10, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
-- You have live tools: web_search, web_fetch, and read_sheet. Training memory is not current enough for 2026 news.
-- read_sheet reads Nick's live Google Sheet (Accounts, Transactions, Holdings, Categories, etc.). Use it for balances, bills, Category IDs, and portfolio questions. Do not guess money numbers if you can read the sheet.
+- You have live tools: web_search, web_fetch, read_sheet, and add_monthly_bill.
+- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with just the phrase. Do NOT ask amount, due date, category ID, or type. The sheet fills those. Then tell him what you added and whether this month is Paid, Pending, or Overdue.
+- read_sheet: live Accounts / Transactions / Holdings / Categories.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
-- Nick can attach photos and files. If an image or document is in the message history, you can see it. Use it on later turns in this thread. Refer to it as the photo or that file unless he names it. Do not say you cannot see an attachment that is already in the history. Do not only "analyze" and forget it.
+- Nick can attach photos and files. If an image or document is in the message history, you can see it.
 # Tools
-- web_search: find URLs. Put 2026 in the query for recent things. If hits are weak, search again with different words.
-- web_fetch: open a full URL and read it. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.
-- read_sheet: read a tab from Nick's finance Google Sheet. Tabs: Accounts, Transactions, Holdings, Categories, Balance History, Securities, Investment Transactions, Bank Connections.
+- web_search, web_fetch, read_sheet, add_monthly_bill.
 - Never invent URLs. Never claim a source you did not see.
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
 Always include sir at least once in each reply.
-When presenting complex information (pay, hours, commute, stores, jobs, options):
-- Do not put everything in one large table or one wall of text.
-- Use a card-based layout: 3–5 cards. Each card answers one question.
-- Each card starts with a heading and emoji, then its own compact markdown table.
-- Use headings like:
-### ⏱️ Hours
-### 💰 Pay
-### 🚗 Commute
-### 📊 Bottom Line
-- Keep tables small and easy to scan.
-- Numbers consistent. Bold totals, differences, and the final result.
-- Use + and − so gains and costs are obvious.
-- Do not repeat the same numbers in every card.
-- Last card is the takeaway: what the numbers mean in 2–4 lines.
-- Never dump raw pipes with no header row.
-- Do not explain the formatting.
 Live facts: answer only from tool text.
 Always end live answers with:
 Sources:
 - [Title](URL)
 If tools failed, say that in one line. Do not guess.
-Code or steps: use markdown. Do not dump essays unless asked.
-Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken; the on-screen text can still include sources.
+Spoken replies: keep them short enough to say out loud. Skip markdown sources when the answer will be spoken.
 """
 
 TOOLS = [
     {
         "name": "web_search",
-        "description": "Live web search. Use for news, dates, scores, prices, weather, docs, and anything after cutoff. Include 2026 in recent queries. Returns titles and URLs. Fetch the best links next.",
+        "description": "Live web search.",
         "input_schema": {
             "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Search query"}
-            },
+            "properties": {"query": {"type": "string"}},
             "required": ["query"],
         },
     },
     {
         "name": "web_fetch",
-        "description": "Fetch a public http(s) URL and return visible page text. Use after web_search or when the user pastes a link. Follow a redirect URL if fetch says so.",
+        "description": "Fetch a public http(s) URL and return visible page text.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "url": {"type": "string", "description": "Full http(s) URL"},
-                "prompt": {"type": "string", "description": "What to extract from the page"},
+                "url": {"type": "string"},
+                "prompt": {"type": "string"},
             },
             "required": ["url"],
         },
     },
     {
         "name": "read_sheet",
-        "description": "Read a tab from Nick's live finance Google Sheet. Use for Robinhood balance, bank accounts, transactions, bills by Category ID, holdings. Allowed tabs: Accounts, Transactions, Holdings, Categories, Balance History, Securities, Investment Transactions, Bank Connections.",
+        "description": "Read a tab from Nick's live finance Google Sheet.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "tab": {
-                    "type": "string",
-                    "description": "Exact tab name, e.g. Accounts or Transactions",
-                },
-                "limit": {
-                    "type": "integer",
-                    "description": "Max rows to return (default 80, max 250)",
-                },
-                "query": {
-                    "type": "string",
-                    "description": "Optional filter text (category id, merchant, robinhood, ford, etc.)",
-                },
+                "tab": {"type": "string"},
+                "limit": {"type": "integer"},
+                "query": {"type": "string"},
             },
             "required": ["tab"],
+        },
+    },
+    {
+        "name": "add_monthly_bill",
+        "description": "Add a monthly bill from a short phrase only (e.g. car note, rent, phone). Infers category, amount, due day, and paid/pending from the sheet. Do not ask follow-up questions first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phrase": {"type": "string", "description": "What Nick called the bill"}
+            },
+            "required": ["phrase"],
         },
     },
 ]
@@ -235,11 +231,7 @@ def fetch_sheet_tab(tab):
         + str(int(time.time()))
     )
     try:
-        _, text = http_get(
-            url,
-            timeout=20,
-            headers={"Accept": "text/csv,*/*"},
-        )
+        _, text = http_get(url, timeout=20, headers={"Accept": "text/csv,*/*"})
     except Exception as e:
         return None, "Sheet fetch failed: %s" % e
     if text.lstrip().startswith("<"):
@@ -262,10 +254,7 @@ def filter_sheet_rows(rows, query, limit):
         limit = int(limit)
     except Exception:
         limit = 80
-    if limit < 1:
-        limit = 80
-    if limit > 250:
-        limit = 250
+    limit = max(1, min(limit, 250))
     return out[:limit]
 
 
@@ -274,15 +263,222 @@ def read_sheet(tab, query="", limit=80):
     if err:
         return err
     rows = filter_sheet_rows(data["rows"], query, limit)
-    payload = {
+    return json.dumps({
         "tab": data["tab"],
         "headers": data["headers"],
         "count_total": data["count"],
         "count_returned": len(rows),
         "query": query or "",
         "rows": rows,
+    }, ensure_ascii=False)
+
+
+def parse_money(val):
+    cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
+    try:
+        return float(cleaned) if cleaned else None
+    except Exception:
+        return None
+
+
+def parse_txn_date(val):
+    s = str(val or "").strip()
+    if not s:
+        return None
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%m/%d/%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(re.sub(r"\s+", " ", s), fmt)
+        except Exception:
+            continue
+    try:
+        return datetime.fromisoformat(s[:10])
+    except Exception:
+        return None
+
+
+def load_bills():
+    if not BILLS_FILE.exists():
+        return []
+    try:
+        data = json.loads(BILLS_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def save_bills(bills):
+    BILLS_FILE.write_text(json.dumps(bills, indent=2), encoding="utf-8")
+
+
+def score_category(phrase, cat):
+    p = (phrase or "").strip().lower()
+    p = ALIASES.get(p, p)
+    cid = str(cat.get("ID") or "").lower()
+    name = str(cat.get("Name") or "").lower()
+    group = str(cat.get("Category Group") or "").lower()
+    desc = str(cat.get("Description") or "").lower()
+    blob = " ".join([cid.replace("_", " "), name, group, desc])
+    score = 0
+    if p == name:
+        score += 12
+    if p in name:
+        score += 8
+    if name and name in p:
+        score += 8
+    for word in re.findall(r"[a-z0-9]+", p):
+        if len(word) < 3:
+            continue
+        if word in name or word in cid.lower().replace("_", " "):
+            score += 3
+        if word in blob:
+            score += 1
+    return score
+
+
+def pick_category(phrase, cats):
+    ranked = sorted(((score_category(phrase, c), c) for c in cats), key=lambda x: -x[0])
+    if not ranked or ranked[0][0] < 3:
+        return None
+    return ranked[0][1]
+
+
+def txn_matches_cat(row, cat_id):
+    return str(row.get("Category ID") or "").strip().upper() == str(cat_id or "").strip().upper()
+
+
+def infer_bill(phrase, display_name=None):
+    phrase = (phrase or "").strip()
+    if not phrase:
+        return None, "Need a bill name."
+    cats_data, err = fetch_sheet_tab("Categories")
+    if err:
+        return None, err
+    tx_data, err = fetch_sheet_tab("Transactions")
+    if err:
+        return None, err
+    cat = pick_category(phrase, cats_data["rows"])
+    if not cat:
+        return None, "Could not match %r to a Category ID on the sheet." % phrase
+    cat_id = str(cat.get("ID") or "").strip()
+    cat_name = str(cat.get("Name") or phrase).strip()
+    now = datetime.now()
+    matched = []
+    this_month = []
+    for row in tx_data["rows"]:
+        if not txn_matches_cat(row, cat_id):
+            continue
+        dt = parse_txn_date(row.get("Date"))
+        amt = parse_money(row.get("Amount") or row.get("Net Amount"))
+        pending_raw = str(row.get("Is Pending?") or "").strip().lower()
+        item = {
+            "date": dt,
+            "amount": abs(amt) if amt is not None else None,
+            "pending": pending_raw in ("true", "yes", "1"),
+            "summary": row.get("Summary") or row.get("Original Description") or "",
+        }
+        matched.append(item)
+        if dt and dt.month == now.month and dt.year == now.year:
+            this_month.append(item)
+    days = [x["date"].day for x in matched if x["date"]]
+    due_day = int(median(days)) if days else 1
+    latest = None
+    for x in sorted(matched, key=lambda r: r["date"] or datetime.min, reverse=True):
+        if x["amount"] is not None:
+            latest = x
+            break
+    amt = latest["amount"] if latest else 0
+    paid_row = next((x for x in this_month if x["amount"] is not None), None)
+    if paid_row:
+        st = "pend" if paid_row["pending"] else "paid"
+        if paid_row["amount"] is not None:
+            amt = paid_row["amount"]
+    else:
+        st = "over" if now.day > due_day else "pend"
+    bill = {
+        "id": cat_id or re.sub(r"[^a-z0-9]+", "-", phrase.lower()).strip("-"),
+        "name": (display_name or phrase).strip().title() if display_name or phrase.lower() != cat_name.lower() else cat_name,
+        "amt": amt,
+        "dueDay": due_day,
+        "type": "Recurring" if len(days) >= 2 else "One-Time",
+        "categoryId": cat_id,
+        "categoryName": cat_name,
+        "st": st,
+        "matchedThisMonth": bool(this_month),
     }
-    return json.dumps(payload, ensure_ascii=False)
+    if phrase.lower() in ("car note", "car loan", "ford", "ford credit"):
+        bill["name"] = "Car note"
+    return bill, None
+
+
+def upsert_bill(bill):
+    bills = load_bills()
+    key = (bill.get("categoryId") or bill.get("id") or "").lower()
+    replaced = False
+    for i, existing in enumerate(bills):
+        ek = (existing.get("categoryId") or existing.get("id") or "").lower()
+        if ek and ek == key:
+            bills[i] = bill
+            replaced = True
+            break
+    if not replaced:
+        bills.append(bill)
+    save_bills(bills)
+    return bill, replaced
+
+
+def refresh_bill_statuses(bills):
+    if not bills:
+        return bills
+    tx_data, err = fetch_sheet_tab("Transactions")
+    if err or not tx_data:
+        return bills
+    now = datetime.now()
+    out = []
+    for bill in bills:
+        cat_id = bill.get("categoryId") or ""
+        this_month = []
+        days = []
+        for row in tx_data["rows"]:
+            if not txn_matches_cat(row, cat_id):
+                continue
+            dt = parse_txn_date(row.get("Date"))
+            if dt:
+                days.append(dt.day)
+            amt = parse_money(row.get("Amount") or row.get("Net Amount"))
+            pending_raw = str(row.get("Is Pending?") or "").strip().lower()
+            if dt and dt.month == now.month and dt.year == now.year:
+                this_month.append({
+                    "amount": abs(amt) if amt is not None else None,
+                    "pending": pending_raw in ("true", "yes", "1"),
+                })
+        due_day = int(bill.get("dueDay") or 1)
+        if days:
+            due_day = int(median(days))
+            bill["dueDay"] = due_day
+        if this_month:
+            row = this_month[0]
+            bill["st"] = "pend" if row["pending"] else "paid"
+            if row["amount"] is not None:
+                bill["amt"] = row["amount"]
+        else:
+            bill["st"] = "over" if now.day > due_day else "pend"
+        out.append(bill)
+    save_bills(out)
+    return out
+
+
+def add_monthly_bill(phrase):
+    bill, err = infer_bill(phrase)
+    if err:
+        return err
+    saved, replaced = upsert_bill(bill)
+    action = "updated" if replaced else "added"
+    return json.dumps({
+        "ok": True,
+        "action": action,
+        "bill": saved,
+        "note": "Showing on Monthly Bills. Status is live from the sheet.",
+    }, ensure_ascii=False)
 
 
 def robinhood_from_accounts(rows):
@@ -290,12 +486,7 @@ def robinhood_from_accounts(rows):
     for row in rows:
         name = str(row.get("Name") or "").strip().lower()
         bank = str(row.get("Bank Connection") or "").strip().lower()
-        bal_raw = row.get("Current Balance") or ""
-        cleaned = re.sub(r"[^0-9.\-]", "", str(bal_raw))
-        try:
-            bal = float(cleaned) if cleaned else None
-        except Exception:
-            bal = None
+        bal = parse_money(row.get("Current Balance"))
         if bal is None:
             continue
         if name == "robinhood individual":
@@ -335,15 +526,6 @@ def web_search(query):
             hits.append((title[:180], url))
         if len(hits) >= 8:
             break
-    if not hits:
-        for m in re.finditer(r'href="(https?://[^"]+)"[^>]*>(.*?)</a>', page, re.I | re.S):
-            url, title = html.unescape(m.group(1)), strip_tags(m.group(2))
-            if "duckduckgo.com" in url:
-                continue
-            if title and len(title) > 8:
-                hits.append((title[:180], url))
-            if len(hits) >= 8:
-                break
     if not hits:
         return "No search hits for: %s" % q
     lines = ["Search results for %s:" % q]
@@ -447,34 +629,13 @@ def sc_search(query):
                     art = art2 or art
                     title = title or t2
                     artist = artist or a2
-                return {
-                    "url": url,
-                    "title": title,
-                    "artist": artist,
-                    "art": art,
-                    "query": q,
-                }
+                return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
         except Exception:
             pass
-    hits = web_search("site:soundcloud.com " + q + " track")
-    urls = re.findall(r"https://soundcloud\.com/[A-Za-z0-9\-_/\.%]+", hits or "")
-    skip = {"search", "discover", "stream", "you", "pages", "tags", "sets"}
-    url = ""
-    for u in urls:
-        u = u.rstrip(".,);]")
-        parts = [p for p in urllib.parse.urlparse(u).path.strip("/").split("/") if p]
-        if len(parts) < 2 or parts[0] in skip:
-            continue
-        url = "https://soundcloud.com/" + "/".join(parts)
-        break
-    title, artist, art = q, "", ""
-    if url:
-        title, artist, art = sc_oembed(url, q)
-    return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
+    return {"url": "", "title": q, "artist": "", "art": "", "query": q}
 
 
 def yahoo_quote(symbol):
-    """Fetch live quote via Yahoo chart endpoint. Returns meta dict or None."""
     symbol = (symbol or "").strip().upper()
     if not symbol or not re.match(r"^[A-Z0-9.\-]{1,12}$", symbol):
         return None
@@ -516,6 +677,8 @@ def run_tool(name, args):
         return web_fetch(args.get("url", ""), args.get("prompt", ""))
     if name == "read_sheet":
         return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
+    if name == "add_monthly_bill":
+        return add_monthly_bill(args.get("phrase", ""))
     return "Unknown tool: %s" % name
 
 
@@ -571,20 +734,14 @@ def clean_block(b):
         data = (src.get("data") or "").strip()
         media = (src.get("media_type") or "image/jpeg").split(";")[0].strip()
         if src.get("type") == "base64" and data and media.startswith("image/"):
-            return {
-                "type": "image",
-                "source": {"type": "base64", "media_type": media, "data": data},
-            }
+            return {"type": "image", "source": {"type": "base64", "media_type": media, "data": data}}
         return None
     if kind == "document":
         src = b.get("source") or {}
         data = (src.get("data") or "").strip()
         media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
         if src.get("type") == "base64" and data:
-            return {
-                "type": "document",
-                "source": {"type": "base64", "media_type": media, "data": data},
-            }
+            return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
         return None
     return None
 
@@ -600,11 +757,8 @@ def clean_messages(raw_msgs):
             continue
         if not isinstance(content, list):
             continue
-        blocks = []
-        for b in content:
-            block = clean_block(b)
-            if block:
-                blocks.append(block)
+        blocks = [clean_block(b) for b in content]
+        blocks = [b for b in blocks if b]
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
@@ -678,6 +832,12 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def _read_json_body(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length <= 0:
+            return {}
+        return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
+
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         if path == "/api/config.js":
@@ -743,6 +903,10 @@ class Handler(SimpleHTTPRequestHandler):
                 "rows": rows,
             })
             return
+        if path == "/api/bills":
+            bills = refresh_bill_statuses(load_bills())
+            self._json(200, {"bills": bills})
+            return
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
@@ -767,6 +931,20 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
+            return
+        if self.path == "/api/bills":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            phrase = (body.get("phrase") or body.get("name") or "").strip()
+            bill, err = infer_bill(phrase)
+            if err:
+                self._json(400, {"error": err})
+                return
+            saved, replaced = upsert_bill(bill)
+            self._json(200, {"ok": True, "action": "updated" if replaced else "added", "bill": saved})
             return
         if self.path != "/api/chat":
             self.send_error(404)
