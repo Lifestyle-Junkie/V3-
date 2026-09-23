@@ -14,7 +14,6 @@ import urllib.request
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from statistics import median
 
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
@@ -59,7 +58,6 @@ SHEET_TABS = [
     "Investment Transactions",
 ]
 BILLS_FILE = DIR / "hope-bills.json"
-
 ALIASES = {
     "car note": "car payment",
     "car note payment": "car payment",
@@ -84,13 +82,14 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Today is Thursday, September 10, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
-- You have live tools: web_search, web_fetch, read_sheet, and add_monthly_bill.
-- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with just the phrase. Do NOT ask amount, due date, category ID, or type. The sheet fills those. Then tell him what you added and whether this month is Paid, Pending, or Overdue.
+- You have live tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
+- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with the phrase. Do NOT ask amount, category ID, or type. Due day is the day-of-month of the MOST RECENT matching transaction (e.g. Ford Credit Sep 15 → due day 15), not an average. Only pass due_day if Nick explicitly gives a day.
+- update_monthly_bill / delete_monthly_bill: change or remove an existing bill by name or categoryId.
 - read_sheet: live Accounts / Transactions / Holdings / Categories.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
 - Nick can attach photos and files. If an image or document is in the message history, you can see it.
 # Tools
-- web_search, web_fetch, read_sheet, add_monthly_bill.
+- web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
 - Never invent URLs. Never claim a source you did not see.
 # Output style
 Default: short, direct, human. Lead with the answer. Then one short why. No filler.
@@ -140,13 +139,39 @@ TOOLS = [
     },
     {
         "name": "add_monthly_bill",
-        "description": "Add a monthly bill from a short phrase only (e.g. car note, rent, phone). Infers category, amount, due day, and paid/pending from the sheet. Do not ask follow-up questions first.",
+        "description": "Add or upsert a monthly bill from a short phrase. Due day = latest matching transaction day unless due_day is passed.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "phrase": {"type": "string", "description": "What Nick called the bill"}
+                "phrase": {"type": "string"},
+                "due_day": {"type": "integer", "description": "Optional 1–31 override"},
+                "name": {"type": "string"},
             },
             "required": ["phrase"],
+        },
+    },
+    {
+        "name": "update_monthly_bill",
+        "description": "Update an existing monthly bill by id, categoryId, or name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "name": {"type": "string"},
+                "due_day": {"type": "integer"},
+                "amount": {"type": "number"},
+                "type": {"type": "string"},
+            },
+            "required": ["id"],
+        },
+    },
+    {
+        "name": "delete_monthly_bill",
+        "description": "Delete a monthly bill by id, categoryId, or name.",
+        "input_schema": {
+            "type": "object",
+            "properties": {"id": {"type": "string"}},
+            "required": ["id"],
         },
     },
 ]
@@ -346,7 +371,7 @@ def txn_matches_cat(row, cat_id):
     return str(row.get("Category ID") or "").strip().upper() == str(cat_id or "").strip().upper()
 
 
-def infer_bill(phrase, display_name=None):
+def infer_bill(phrase, display_name=None, due_day_override=None):
     phrase = (phrase or "").strip()
     if not phrase:
         return None, "Need a bill name."
@@ -379,14 +404,26 @@ def infer_bill(phrase, display_name=None):
         matched.append(item)
         if dt and dt.month == now.month and dt.year == now.year:
             this_month.append(item)
-    days = [x["date"].day for x in matched if x["date"]]
-    due_day = int(median(days)) if days else 1
-    latest = None
-    for x in sorted(matched, key=lambda r: r["date"] or datetime.min, reverse=True):
-        if x["amount"] is not None:
-            latest = x
-            break
-    amt = latest["amount"] if latest else 0
+
+    dated = [x for x in matched if x["date"]]
+    dated.sort(key=lambda r: r["date"], reverse=True)
+    latest = dated[0] if dated else None
+
+    if due_day_override is not None:
+        try:
+            due_day = max(1, min(31, int(due_day_override)))
+            due_source = "override"
+        except Exception:
+            due_day = latest["date"].day if latest else 1
+            due_source = "latest_txn" if latest else "default"
+    elif latest:
+        due_day = latest["date"].day
+        due_source = "latest_txn"
+    else:
+        due_day = 1
+        due_source = "default"
+
+    amt = latest["amount"] if latest and latest["amount"] is not None else 0
     paid_row = next((x for x in this_month if x["amount"] is not None), None)
     if paid_row:
         st = "pend" if paid_row["pending"] else "paid"
@@ -394,19 +431,28 @@ def infer_bill(phrase, display_name=None):
             amt = paid_row["amount"]
     else:
         st = "over" if now.day > due_day else "pend"
+
+    label = (display_name or phrase).strip()
+    if phrase.lower() in ("car note", "car loan", "ford", "ford credit"):
+        label = "Car note"
+    elif not display_name and phrase.lower() == cat_name.lower():
+        label = cat_name
+    else:
+        label = label.title()
+
     bill = {
         "id": cat_id or re.sub(r"[^a-z0-9]+", "-", phrase.lower()).strip("-"),
-        "name": (display_name or phrase).strip().title() if display_name or phrase.lower() != cat_name.lower() else cat_name,
+        "name": label,
         "amt": amt,
         "dueDay": due_day,
-        "type": "Recurring" if len(days) >= 2 else "One-Time",
+        "dueSource": due_source,
+        "latestTxnDate": latest["date"].strftime("%Y-%m-%d") if latest else "",
+        "type": "Recurring" if len(dated) >= 2 else "One-Time",
         "categoryId": cat_id,
         "categoryName": cat_name,
         "st": st,
         "matchedThisMonth": bool(this_month),
     }
-    if phrase.lower() in ("car note", "car loan", "ford", "ford credit"):
-        bill["name"] = "Car note"
     return bill, None
 
 
@@ -417,6 +463,9 @@ def upsert_bill(bill):
     for i, existing in enumerate(bills):
         ek = (existing.get("categoryId") or existing.get("id") or "").lower()
         if ek and ek == key:
+            if existing.get("dueSource") == "override" and bill.get("dueSource") != "override":
+                bill["dueDay"] = existing.get("dueDay")
+                bill["dueSource"] = "override"
             bills[i] = bill
             replaced = True
             break
@@ -437,48 +486,117 @@ def refresh_bill_statuses(bills):
     for bill in bills:
         cat_id = bill.get("categoryId") or ""
         this_month = []
-        days = []
+        latest_dt = None
+        latest_amt = None
+        count = 0
         for row in tx_data["rows"]:
             if not txn_matches_cat(row, cat_id):
                 continue
             dt = parse_txn_date(row.get("Date"))
-            if dt:
-                days.append(dt.day)
             amt = parse_money(row.get("Amount") or row.get("Net Amount"))
             pending_raw = str(row.get("Is Pending?") or "").strip().lower()
+            count += 1
+            if dt and (latest_dt is None or dt > latest_dt):
+                latest_dt = dt
+                if amt is not None:
+                    latest_amt = abs(amt)
             if dt and dt.month == now.month and dt.year == now.year:
                 this_month.append({
                     "amount": abs(amt) if amt is not None else None,
                     "pending": pending_raw in ("true", "yes", "1"),
                 })
+        if bill.get("dueSource") != "override" and latest_dt:
+            bill["dueDay"] = latest_dt.day
+            bill["dueSource"] = "latest_txn"
+            bill["latestTxnDate"] = latest_dt.strftime("%Y-%m-%d")
         due_day = int(bill.get("dueDay") or 1)
-        if days:
-            due_day = int(median(days))
-            bill["dueDay"] = due_day
         if this_month:
             row = this_month[0]
             bill["st"] = "pend" if row["pending"] else "paid"
             if row["amount"] is not None:
                 bill["amt"] = row["amount"]
         else:
+            if latest_amt is not None:
+                bill["amt"] = latest_amt
             bill["st"] = "over" if now.day > due_day else "pend"
+        if count >= 2:
+            bill["type"] = "Recurring"
         out.append(bill)
     save_bills(out)
     return out
 
 
-def add_monthly_bill(phrase):
-    bill, err = infer_bill(phrase)
+def add_monthly_bill(phrase, due_day=None, name=None):
+    bill, err = infer_bill(phrase, display_name=name, due_day_override=due_day)
     if err:
         return err
     saved, replaced = upsert_bill(bill)
-    action = "updated" if replaced else "added"
     return json.dumps({
         "ok": True,
-        "action": action,
+        "action": "updated" if replaced else "added",
         "bill": saved,
-        "note": "Showing on Monthly Bills. Status is live from the sheet.",
+        "note": "Due day is the latest matching transaction day unless overridden.",
     }, ensure_ascii=False)
+
+
+def find_bill(bills, key):
+    k = str(key or "").strip().lower()
+    if not k:
+        return -1
+    for i, b in enumerate(bills):
+        if str(b.get("id") or "").lower() == k:
+            return i
+        if str(b.get("categoryId") or "").lower() == k:
+            return i
+        if str(b.get("name") or "").lower() == k:
+            return i
+        if str(b.get("categoryName") or "").lower() == k:
+            return i
+    aliases = {"car note": "car payment", "ford": "car payment", "car loan": "car payment"}
+    k2 = aliases.get(k, k)
+    for i, b in enumerate(bills):
+        blob = " ".join([
+            str(b.get("name") or ""),
+            str(b.get("categoryName") or ""),
+            str(b.get("categoryId") or "").replace("_", " "),
+        ]).lower()
+        if k2 in blob:
+            return i
+    return -1
+
+
+def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name=None):
+    bills = load_bills()
+    i = find_bill(bills, bill_id)
+    if i < 0:
+        return "No bill matched %r." % bill_id
+    if name:
+        bills[i]["name"] = str(name).strip()
+    if due_day is not None:
+        try:
+            bills[i]["dueDay"] = max(1, min(31, int(due_day)))
+            bills[i]["dueSource"] = "override"
+        except Exception:
+            pass
+    if amount is not None:
+        try:
+            bills[i]["amt"] = abs(float(amount))
+        except Exception:
+            pass
+    if type_name:
+        bills[i]["type"] = "One-Time" if "one" in str(type_name).lower() else "Recurring"
+    save_bills(bills)
+    return json.dumps({"ok": True, "action": "updated", "bill": bills[i]}, ensure_ascii=False)
+
+
+def delete_monthly_bill(bill_id):
+    bills = load_bills()
+    i = find_bill(bills, bill_id)
+    if i < 0:
+        return "No bill matched %r." % bill_id
+    removed = bills.pop(i)
+    save_bills(bills)
+    return json.dumps({"ok": True, "action": "deleted", "bill": removed}, ensure_ascii=False)
 
 
 def robinhood_from_accounts(rows):
@@ -678,7 +796,17 @@ def run_tool(name, args):
     if name == "read_sheet":
         return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
     if name == "add_monthly_bill":
-        return add_monthly_bill(args.get("phrase", ""))
+        return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"))
+    if name == "update_monthly_bill":
+        return update_monthly_bill(
+            args.get("id", ""),
+            args.get("name"),
+            args.get("due_day"),
+            args.get("amount"),
+            args.get("type"),
+        )
+    if name == "delete_monthly_bill":
+        return delete_monthly_bill(args.get("id", ""))
     return "Unknown tool: %s" % name
 
 
@@ -939,12 +1067,43 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400, {"error": "Bad JSON"})
                 return
             phrase = (body.get("phrase") or body.get("name") or "").strip()
-            bill, err = infer_bill(phrase)
+            due_day = body.get("due_day") if "due_day" in body else body.get("dueDay")
+            bill, err = infer_bill(phrase, display_name=body.get("displayName"), due_day_override=due_day)
             if err:
                 self._json(400, {"error": err})
                 return
             saved, replaced = upsert_bill(bill)
             self._json(200, {"ok": True, "action": "updated" if replaced else "added", "bill": saved})
+            return
+        if self.path == "/api/bills/update":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            raw = update_monthly_bill(
+                body.get("id") or body.get("phrase") or "",
+                body.get("name"),
+                body.get("due_day") if "due_day" in body else body.get("dueDay"),
+                body.get("amount") if "amount" in body else body.get("amt"),
+                body.get("type"),
+            )
+            try:
+                self._json(200, json.loads(raw))
+            except Exception:
+                self._json(404, {"error": raw})
+            return
+        if self.path == "/api/bills/delete":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            raw = delete_monthly_bill(body.get("id") or body.get("phrase") or body.get("name") or "")
+            try:
+                self._json(200, json.loads(raw))
+            except Exception:
+                self._json(404, {"error": raw})
             return
         if self.path != "/api/chat":
             self.send_error(404)
