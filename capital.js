@@ -50,7 +50,6 @@ function parseCsvLine(line) {
     return c.replace(/^"|"$/g, "").replace(/""/g, '"').trim();
   });
 }
-/* ── Robinhood individual only ───────────────────────────────────────── */
 async function fetchRobinhoodTotal() {
   try {
     const viaApi = await fetch("/api/sheet/robinhood?_=" + Date.now(), { cache: "no-store" });
@@ -84,13 +83,8 @@ async function fetchRobinhoodTotal() {
       if (!isFinite(bal)) continue;
       const nameL = name.toLowerCase();
       const bankL = bank.toLowerCase();
-      if (nameL === "robinhood individual") {
-        found = bal;
-        break;
-      }
-      if (found == null && (nameL.indexOf("robinhood") !== -1 || bankL === "robinhood")) {
-        found = bal;
-      }
+      if (nameL === "robinhood individual") { found = bal; break; }
+      if (found == null && (nameL.indexOf("robinhood") !== -1 || bankL === "robinhood")) found = bal;
     }
     if (found != null) {
       liveRhTotal = found;
@@ -104,7 +98,6 @@ function startLiveSync() {
   fetchRobinhoodTotal();
   setInterval(fetchRobinhoodTotal, 60000);
 }
-/* ── Bills (freeform — not tied to the sheet) ────────────────────────── */
 function dueLabel(bill) {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const iso = bill && bill.cycleEnd;
@@ -125,39 +118,29 @@ async function fetchBillsFromServer() {
     const res = await fetch("/api/bills?_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const data = await res.json();
-    CAP_BILLS = Array.isArray(data.bills) ? data.bills : [];
+    const next = Array.isArray(data.bills) ? data.bills : null;
+    if (next == null) return;
+    if (!next.length && CAP_BILLS.length) return;
+    CAP_BILLS = next;
     renderBills();
   } catch (err) {
     console.warn("[capital] bills fetch failed:", err);
-    renderBills();
   }
 }
 function addBillViaEdit() {
   const phrase = prompt("Add bill  (name amount due day)\ne.g. rent 1450 due 1");
-  if (phrase == null) return;
-  const q = phrase.trim();
-  if (!q) return;
+  if (phrase == null || !phrase.trim()) return;
   fetch("/api/bills", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ phrase: q })
+    body: JSON.stringify({ phrase: phrase.trim() })
   })
-    .then(function (res) {
-      return res.json().then(function (data) {
-        return { ok: res.ok, data: data };
-      });
-    })
+    .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
     .then(function (out) {
-      if (!out.ok) {
-        alert(out.data.error || "Could not add bill");
-        return;
-      }
+      if (!out.ok) { alert(out.data.error || "Could not add bill"); return; }
       fetchBillsFromServer();
     })
-    .catch(function (err) {
-      console.warn("[capital] add bill failed:", err);
-      alert("Could not add bill");
-    });
+    .catch(function () { alert("Could not add bill"); });
 }
 function editBill(b) {
   const name = prompt("Name", b.name || "");
@@ -180,22 +163,12 @@ function editBill(b) {
       status: st
     })
   })
-    .then(function (res) {
-      return res.json().then(function (data) {
-        return { ok: res.ok, data: data };
-      });
-    })
+    .then(function (res) { return res.json().then(function (data) { return { ok: res.ok, data: data }; }); })
     .then(function (out) {
-      if (!out.ok) {
-        alert(out.data.error || "Could not update bill");
-        return;
-      }
+      if (!out.ok) { alert(out.data.error || "Could not update bill"); return; }
       fetchBillsFromServer();
     })
-    .catch(function (err) {
-      console.warn("[capital] update bill failed:", err);
-      alert("Could not update bill");
-    });
+    .catch(function () { alert("Could not update bill"); });
 }
 function startBillSync() {
   fetchBillsFromServer();
@@ -203,10 +176,7 @@ function startBillSync() {
 }
 function ensureBillEditButton() {
   let btn = document.getElementById("capBillEdit");
-  if (btn) {
-    btn.onclick = addBillViaEdit;
-    return;
-  }
+  if (btn) { btn.onclick = addBillViaEdit; return; }
   const box = document.getElementById("capBills");
   if (!box) return;
   const card = box.closest(".cap-card") || box.parentElement;
@@ -238,13 +208,10 @@ function renderBills() {
   ensureBillEditButton();
   let total = 0;
   if (!CAP_BILLS.length) {
-    box.innerHTML =
-      '<div class="cap-bill-empty">No bills yet — tap Edit or tell Hope in chat</div>';
+    box.innerHTML = '<div class="cap-bill-empty">No bills yet — tap Edit or tell Hope in chat</div>';
   } else {
     box.innerHTML =
-      '<div class="cap-bill-h">' +
-        "<span>Bill</span><span>Amount</span><span>Due</span><span>Type</span><span>Status</span>" +
-      "</div>" +
+      '<div class="cap-bill-h"><span>Bill</span><span>Amount</span><span>Due</span><span>Type</span><span>Status</span></div>' +
       CAP_BILLS.map(function (b) {
         total += Number(b.amt) || 0;
         return (
@@ -268,7 +235,6 @@ function renderBills() {
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
 }
-/* ── Interactive tickers ─────────────────────────────────────────────── */
 function logoUrl(ticker) {
   return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
 }
@@ -276,6 +242,36 @@ function sparkHtml() {
   let html = '<span class="cap-spark"><span class="candle-chart">';
   for (let i = 0; i < 12; i++) html += '<span class="candle"></span>';
   return html + "</span></span>";
+}
+function holdingsPayload() {
+  return holdings.map(function (h) {
+    return { t: h.t, name: h.name || h.t, price: h.price, chg: h.chg };
+  });
+}
+function saveHoldingsToServer() {
+  fetch("/api/holdings", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ holdings: holdingsPayload() })
+  }).catch(function (err) {
+    console.warn("[capital] holdings save failed:", err);
+  });
+}
+async function fetchHoldingsFromServer() {
+  try {
+    const res = await fetch("/api/holdings?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.holdings)) {
+      holdings = data.holdings.map(function (h) {
+        return { t: String(h.t || "").toUpperCase(), name: h.name || h.t, price: h.price, chg: Number(h.chg) || 0 };
+      }).filter(function (h) { return h.t; });
+      renderHolds();
+      fetchQuotes();
+    }
+  } catch (err) {
+    console.warn("[capital] holdings fetch failed:", err);
+  }
 }
 function renderHolds() {
   const box = document.getElementById("capHolds");
@@ -285,9 +281,7 @@ function renderHolds() {
       '<input id="capTickerInput" type="text" placeholder="Add ticker (e.g. AAPL)" maxlength="10" autocomplete="off" />' +
       '<button type="button" id="capTickerAdd">Add</button>' +
     "</div>" +
-    '<div class="cap-hold cap-hold-h">' +
-      "<span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span>" +
-    "</div>";
+    '<div class="cap-hold cap-hold-h"><span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span></div>';
   if (!holdings.length) {
     html += '<div class="cap-hold-empty">No tickers yet — search above to add</div>';
   } else {
@@ -329,10 +323,7 @@ function renderHolds() {
   if (addBtn) addBtn.addEventListener("click", tryAdd);
   if (input) {
     input.addEventListener("keydown", function (e) {
-      if (e.key === "Enter") {
-        e.preventDefault();
-        tryAdd();
-      }
+      if (e.key === "Enter") { e.preventDefault(); tryAdd(); }
     });
   }
   box.querySelectorAll(".cap-hold-rm").forEach(function (btn) {
@@ -348,20 +339,15 @@ function renderHolds() {
       row.classList.add("dragging");
       e.dataTransfer.effectAllowed = "move";
     });
-    row.addEventListener("dragend", function () {
-      row.classList.remove("dragging");
-      dragIdx = null;
-    });
-    row.addEventListener("dragover", function (e) {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-    });
+    row.addEventListener("dragend", function () { row.classList.remove("dragging"); dragIdx = null; });
+    row.addEventListener("dragover", function (e) { e.preventDefault(); e.dataTransfer.dropEffect = "move"; });
     row.addEventListener("drop", function (e) {
       e.preventDefault();
       const toIdx = Number(row.getAttribute("data-idx"));
       if (dragIdx == null || dragIdx === toIdx) return;
       const item = holdings.splice(dragIdx, 1)[0];
       holdings.splice(toIdx, 0, item);
+      saveHoldingsToServer();
       renderHolds();
     });
   });
@@ -370,37 +356,32 @@ function addTicker(symbol) {
   const t = symbol.toUpperCase();
   if (holdings.some(function (h) { return h.t === t; })) return;
   holdings.push({ t: t, name: t, price: null, chg: 0 });
+  saveHoldingsToServer();
   renderHolds();
   fetchQuotes();
 }
 function removeTicker(symbol) {
-  const t = symbol.toUpperCase();
-  holdings = holdings.filter(function (h) { return h.t !== t; });
+  holdings = holdings.filter(function (h) { return h.t !== symbol.toUpperCase(); });
+  saveHoldingsToServer();
   renderHolds();
 }
 async function fetchQuotes() {
   if (!holdings.length) return;
-  const results = await Promise.all(
-    holdings.map(async function (h) {
-      try {
-        const res = await fetch(
-          "/api/quote?symbol=" + encodeURIComponent(h.t) + "&_=" + Date.now(),
-          { cache: "no-store" }
-        );
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const meta = await res.json();
-        return {
-          t: h.t,
-          price: meta.regularMarketPrice != null ? meta.regularMarketPrice : null,
-          chg: meta.regularMarketChangePercent != null ? meta.regularMarketChangePercent : 0,
-          name: meta.shortName || h.t
-        };
-      } catch (err) {
-        console.warn("[capital] quote failed for", h.t, err);
-        return null;
-      }
-    })
-  );
+  const results = await Promise.all(holdings.map(async function (h) {
+    try {
+      const res = await fetch("/api/quote?symbol=" + encodeURIComponent(h.t) + "&_=" + Date.now(), { cache: "no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const meta = await res.json();
+      return {
+        t: h.t,
+        price: meta.regularMarketPrice != null ? meta.regularMarketPrice : null,
+        chg: meta.regularMarketChangePercent != null ? meta.regularMarketChangePercent : 0,
+        name: meta.shortName || h.t
+      };
+    } catch (err) {
+      return null;
+    }
+  }));
   let changed = false;
   results.forEach(function (q) {
     if (!q) return;
@@ -410,13 +391,15 @@ async function fetchQuotes() {
     if (q.chg != null) { h.chg = q.chg; changed = true; }
     if (q.name) h.name = q.name;
   });
-  if (changed) renderHolds();
+  if (changed) {
+    renderHolds();
+    saveHoldingsToServer();
+  }
 }
 function startQuoteSync() {
   fetchQuotes();
   setInterval(fetchQuotes, 60000);
 }
-/* ── Chart / alloc / months / insights ───────────────────────────────── */
 function drawCapChart() {
   const el = document.getElementById("capChart");
   if (!el) return;
@@ -460,12 +443,7 @@ function renderMonths() {
   const box = document.getElementById("capMonths");
   if (!box) return;
   box.innerHTML = CAP_MONTHS.map(function (m) {
-    return (
-      '<div class="cap-mo">' +
-      m.m +
-      "<b>" + (m.ok ? "✓" : "✕") + " $" + m.v.toLocaleString() + "</b>" +
-      "</div>"
-    );
+    return '<div class="cap-mo">' + m.m + "<b>" + (m.ok ? "✓" : "✕") + " $" + m.v.toLocaleString() + "</b></div>";
   }).join("");
 }
 function renderInsights() {
@@ -480,15 +458,9 @@ function renderInsights() {
   ];
   box.innerHTML = rows.map(function (r) {
     const mark = r.tone === "warn" ? WARN_ICO : DOWN_ICO;
-    return (
-      '<div class="cap-ins ' + r.tone + '">' +
-        '<span class="cap-ins-ico">' + mark + "</span>" +
-        "<div><b>" + r.title + "</b><span>" + r.note + "</span></div>" +
-      "</div>"
-    );
+    return '<div class="cap-ins ' + r.tone + '"><span class="cap-ins-ico">' + mark + "</span><div><b>" + r.title + "</b><span>" + r.note + "</span></div></div>";
   }).join("");
 }
-/* ── Boot ────────────────────────────────────────────────────────────── */
 function bootCapital() {
   drawCapChart();
   renderHolds();
@@ -496,19 +468,16 @@ function bootCapital() {
   renderBills();
   renderMonths();
   renderInsights();
+  fetchHoldingsFromServer();
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      document.querySelectorAll("[data-cap-tab]").forEach(function (b) {
-        b.classList.remove("on");
-      });
+      document.querySelectorAll("[data-cap-tab]").forEach(function (b) { b.classList.remove("on"); });
       btn.classList.add("on");
     });
   });
   document.querySelectorAll(".cap-ranges button").forEach(function (btn) {
     btn.addEventListener("click", function () {
-      document.querySelectorAll(".cap-ranges button").forEach(function (b) {
-        b.classList.remove("on");
-      });
+      document.querySelectorAll(".cap-ranges button").forEach(function (b) { b.classList.remove("on"); });
       btn.classList.add("on");
     });
   });
@@ -531,9 +500,7 @@ function bootCapital() {
   startBillSync();
 }
 function goToCapitalTab() {
-  document.querySelectorAll(".nav-item").forEach(function (i) {
-    i.classList.remove("active");
-  });
+  document.querySelectorAll(".nav-item").forEach(function (i) { i.classList.remove("active"); });
   const nav = document.querySelector('.nav-item[data-view="capital"]');
   if (nav) nav.classList.add("active");
   if (typeof setView === "function") setView("capital");
@@ -542,8 +509,5 @@ function goToCapitalTab() {
     layout.classList.add("capital-mode");
   }
 }
-if (document.readyState === "loading") {
-  document.addEventListener("DOMContentLoaded", bootCapital);
-} else {
-  bootCapital();
-}
+if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootCapital);
+else bootCapital();
