@@ -60,6 +60,7 @@ SHEET_TABS = [
 ]
 BILLS_FILE = DIR / "hope-bills.json"
 HOLDINGS_FILE = DIR / "hope-holdings.json"
+CASH_FILE = DIR / "hope-cash.json"
 
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
@@ -73,7 +74,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
 - update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
 - delete_monthly_bill: by id or exact name.
-- read_capital: use this when Nick asks about the Capital screen, monthly bills, or ticker holdings. It is the live Holdings + Bills list from the app.
+- read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings. Use this whenever Nick asks about money on Capital.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 # Output style
 Short, direct. Include sir once. Live facts from tools only.
@@ -117,7 +118,7 @@ TOOLS = [
     },
     {
         "name": "read_capital",
-        "description": "See Nick's Capital screen: monthly bills, ticker holdings with live prices, and Robinhood total.",
+        "description": "See Nick's Capital screen: cash on hand, Robinhood, net worth, monthly bills, and ticker holdings.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -345,16 +346,36 @@ def save_holdings(rows):
     HOLDINGS_FILE.write_text(json.dumps(rows, indent=2), encoding="utf-8")
 
 
+def load_cash():
+    if not CASH_FILE.exists():
+        return 2500.0
+    try:
+        data = json.loads(CASH_FILE.read_text(encoding="utf-8"))
+        n = float(data.get("cash") if isinstance(data, dict) else data)
+        return n if n == n else 2500.0
+    except Exception:
+        return 2500.0
+
+
+def save_cash(n):
+    CASH_FILE.write_text(json.dumps({"cash": float(n)}, indent=2), encoding="utf-8")
+
+
 def read_capital():
     bills = load_bills()
     holds = load_holdings()
+    cash = load_cash()
     rh = None
     acc, err = fetch_sheet_tab("Accounts")
     if not err:
         rh = robinhood_from_accounts(acc["rows"])
+    net = (rh or 0) + cash
     return json.dumps({
+        "screen": "Capital",
+        "cash_on_hand": cash,
         "robinhood": rh,
-        "bills": bills,
+        "net_worth": net,
+        "monthly_bills": bills,
         "holdings": holds,
     }, ensure_ascii=False)
 
@@ -952,6 +973,9 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/holdings":
             self._json(200, {"holdings": load_holdings()})
             return
+        if path == "/api/cash":
+            self._json(200, {"cash": load_cash()})
+            return
         item = STATIC.get(path)
         if not item:
             self.send_error(404)
@@ -974,6 +998,19 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         if self.path == "/api/speak":
             self.handle_speak()
+            return
+        if self.path == "/api/cash":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            n = parse_money(body.get("cash"))
+            if n is None:
+                self._json(400, {"error": "cash required"})
+                return
+            save_cash(n)
+            self._json(200, {"ok": True, "cash": n})
             return
         if self.path == "/api/holdings":
             try:
