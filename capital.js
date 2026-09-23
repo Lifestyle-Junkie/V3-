@@ -34,6 +34,30 @@ function getCashFromDom() {
   const n = parseMoney(el.textContent);
   return isFinite(n) ? n : liveCash;
 }
+function saveCashToServer(n) {
+  fetch("/api/cash", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ cash: n })
+  }).catch(function (err) {
+    console.warn("[capital] cash save failed:", err);
+  });
+}
+async function fetchCashFromServer() {
+  try {
+    const res = await fetch("/api/cash?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data && isFinite(data.cash)) {
+      liveCash = data.cash;
+      const el = document.getElementById("capCashVal");
+      if (el) el.textContent = money(liveCash);
+      updateNetWorthUI(liveRhTotal, liveCash);
+    }
+  } catch (err) {
+    console.warn("[capital] cash fetch failed:", err);
+  }
+}
 function updateNetWorthUI(rh, cash) {
   const net = rh + cash;
   const rhEl = document.getElementById("capRhVal");
@@ -468,6 +492,7 @@ function bootCapital() {
   renderBills();
   renderMonths();
   renderInsights();
+  fetchCashFromServer();
   fetchHoldingsFromServer();
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
@@ -493,6 +518,7 @@ function bootCapital() {
       const el = document.getElementById("capCashVal");
       if (el) el.textContent = money(n);
       updateNetWorthUI(liveRhTotal, n);
+      saveCashToServer(n);
     });
   }
   startLiveSync();
