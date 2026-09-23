@@ -104,7 +104,7 @@ function startLiveSync() {
   fetchRobinhoodTotal();
   setInterval(fetchRobinhoodTotal, 60000);
 }
-/* ── Bills from Hope backend (cycle window) ──────────────────────────── */
+/* ── Bills (freeform — not tied to the sheet) ────────────────────────── */
 function dueLabel(bill) {
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   const iso = bill && bill.cycleEnd;
@@ -133,7 +133,7 @@ async function fetchBillsFromServer() {
   }
 }
 function addBillViaEdit() {
-  const phrase = prompt("Bill to add (e.g. car note)");
+  const phrase = prompt("Add bill  (name amount due day)\ne.g. rent 1450 due 1");
   if (phrase == null) return;
   const q = phrase.trim();
   if (!q) return;
@@ -149,7 +149,7 @@ function addBillViaEdit() {
     })
     .then(function (out) {
       if (!out.ok) {
-        alert(out.data.error || "Could not match that bill on the sheet");
+        alert(out.data.error || "Could not add bill");
         return;
       }
       fetchBillsFromServer();
@@ -157,6 +157,44 @@ function addBillViaEdit() {
     .catch(function (err) {
       console.warn("[capital] add bill failed:", err);
       alert("Could not add bill");
+    });
+}
+function editBill(b) {
+  const name = prompt("Name", b.name || "");
+  if (name == null) return;
+  const amt = prompt("Amount", String(b.amt != null ? b.amt : ""));
+  if (amt == null) return;
+  const due = prompt("Due day (1–31)", String(b.dueDay || 1));
+  if (due == null) return;
+  const st = prompt("Status: paid / upcoming / unpaid", statusLabel(b.st));
+  if (st == null) return;
+  const n = parseMoney(amt);
+  fetch("/api/bills/update", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: b.id || b.name,
+      name: name.trim(),
+      amount: isFinite(n) ? n : b.amt,
+      due_day: Number(due) || b.dueDay || 1,
+      status: st
+    })
+  })
+    .then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    })
+    .then(function (out) {
+      if (!out.ok) {
+        alert(out.data.error || "Could not update bill");
+        return;
+      }
+      fetchBillsFromServer();
+    })
+    .catch(function (err) {
+      console.warn("[capital] update bill failed:", err);
+      alert("Could not update bill");
     });
 }
 function startBillSync() {
@@ -210,7 +248,7 @@ function renderBills() {
       CAP_BILLS.map(function (b) {
         total += Number(b.amt) || 0;
         return (
-          '<div class="cap-bill">' +
+          '<div class="cap-bill" data-bill-id="' + (b.id || "") + '" style="cursor:pointer" title="Click to edit">' +
             "<span>" + b.name + "</span>" +
             "<span>" + money(b.amt) + "</span>" +
             "<span>" + dueLabel(b) + "</span>" +
@@ -219,6 +257,13 @@ function renderBills() {
           "</div>"
         );
       }).join("");
+    box.querySelectorAll(".cap-bill[data-bill-id]").forEach(function (row) {
+      row.addEventListener("click", function () {
+        const id = row.getAttribute("data-bill-id");
+        const bill = CAP_BILLS.find(function (x) { return String(x.id) === String(id); });
+        if (bill) editBill(bill);
+      });
+    });
   }
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
