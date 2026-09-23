@@ -12,20 +12,15 @@ const CAP_MONTHS = [
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 
-/* ── Single Google Sheet (Accounts + Transactions) ───────────────────── */
 const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
-const SHEET_TX_CSV =
-  "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
-  "/gviz/tq?tqx=out:csv&sheet=Transactions";
 
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
-
-/* Bills start empty — user adds via top-right Edit */
 let CAP_BILLS = [];
+let holdings = [];
 
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
@@ -65,8 +60,20 @@ function parseCsvLine(line) {
   });
 }
 
-/* ── Google Sheets: Robinhood individual only ────────────────────────── */
+/* ── Robinhood individual only ───────────────────────────────────────── */
 async function fetchRobinhoodTotal() {
+  try {
+    const viaApi = await fetch("/api/sheet/robinhood?_=" + Date.now(), { cache: "no-store" });
+    if (viaApi.ok) {
+      const data = await viaApi.json();
+      if (data && isFinite(data.current_balance)) {
+        liveRhTotal = data.current_balance;
+        updateNetWorthUI(liveRhTotal, getCashFromDom());
+        return;
+      }
+    }
+  } catch (err) {}
+
   try {
     const res = await fetch(SHEET_ACCOUNTS_CSV + "&_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
@@ -74,25 +81,20 @@ async function fetchRobinhoodTotal() {
     if (csv.trim().startsWith("<!")) throw new Error("Sheet not shared");
     const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) return;
-
     const headers = parseCsvLine(lines[0]);
     const nameIdx = headers.findIndex(function (h) { return /^name$/i.test(h); });
     const bankIdx = headers.findIndex(function (h) { return /bank\s*connection$/i.test(h); });
     const balIdx = headers.findIndex(function (h) { return /current\s*balance/i.test(h); });
     if (balIdx === -1) return;
-
     let found = null;
-
     for (let i = 1; i < lines.length; i++) {
       const cells = parseCsvLine(lines[i]);
       const name = (nameIdx >= 0 ? cells[nameIdx] : cells[1] || "").trim();
       const bank = (bankIdx >= 0 ? cells[bankIdx] : "").trim();
       const bal = parseMoney(cells[balIdx]);
       if (!isFinite(bal)) continue;
-
       const nameL = name.toLowerCase();
       const bankL = bank.toLowerCase();
-
       if (nameL === "robinhood individual") {
         found = bal;
         break;
@@ -101,7 +103,6 @@ async function fetchRobinhoodTotal() {
         found = bal;
       }
     }
-
     if (found != null) {
       liveRhTotal = found;
       updateNetWorthUI(liveRhTotal, getCashFromDom());
@@ -116,160 +117,57 @@ function startLiveSync() {
   setInterval(fetchRobinhoodTotal, 60000);
 }
 
-/* ── Bills ↔ Category ID match ───────────────────────────────────────── */
+/* ── Bills from Hope backend (sheet-inferred) ────────────────────────── */
 function dueLabel(dueDay) {
   const d = Number(dueDay) || 1;
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return months[new Date().getMonth()] + " " + d;
 }
 
-function statusForBill(bill, matched) {
-  const now = new Date();
-  const dueDay = Number(bill.dueDay) || 1;
-  const duePassed = now.getDate() > dueDay;
-  if (matched) {
-    if (matched.pending) return "pend";
-    return "paid";
-  }
-  return duePassed ? "over" : "pend";
-}
-
-async function fetchTransactionsAndMatch() {
-  if (!CAP_BILLS.length) {
-    renderBills();
-    return;
-  }
+async function fetchBillsFromServer() {
   try {
-    const res = await fetch(SHEET_TX_CSV + "&_=" + Date.now(), { cache: "no-store" });
+    const res = await fetch("/api/bills?_=" + Date.now(), { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    const csv = await res.text();
-    if (csv.trim().startsWith("<!")) throw new Error("Transactions sheet not shared (401)");
-
-    const lines = csv.trim().split(/\r?\n/);
-    if (lines.length < 2) {
-      CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
-      renderBills();
-      return;
-    }
-
-    const headers = parseCsvLine(lines[0]).map(function (h) { return h.toLowerCase(); });
-    const idx = {
-      date: headers.findIndex(function (h) { return h === "date"; }),
-      month: headers.findIndex(function (h) { return h === "month"; }),
-      amount: headers.findIndex(function (h) { return h === "amount"; }),
-      pending: headers.findIndex(function (h) { return /is\s*pending/i.test(h); }),
-      catId: headers.findIndex(function (h) { return /category\s*id/i.test(h); }),
-      catName: headers.findIndex(function (h) { return /category\s*name/i.test(h); }),
-      net: headers.findIndex(function (h) { return /net\s*amount/i.test(h); })
-    };
-
-    const now = new Date();
-    const thisMonth = now.getMonth();
-    const thisYear = now.getFullYear();
-    const monthNames = [
-      "january","february","march","april","may","june",
-      "july","august","september","october","november","december"
-    ];
-
-    const rows = [];
-    for (let i = 1; i < lines.length; i++) {
-      const cells = parseCsvLine(lines[i]);
-      if (!cells.length) continue;
-      const amount = parseMoney(
-        idx.amount >= 0 ? cells[idx.amount] : (idx.net >= 0 ? cells[idx.net] : "")
-      );
-      const pendingRaw = (idx.pending >= 0 ? cells[idx.pending] : "").toLowerCase();
-      rows.push({
-        catId: idx.catId >= 0 ? String(cells[idx.catId] || "").trim() : "",
-        catName: idx.catName >= 0 ? cells[idx.catName] : "",
-        amount: isFinite(amount) ? Math.abs(amount) : null,
-        pending: pendingRaw === "true" || pendingRaw === "yes" || pendingRaw === "1",
-        dateStr: idx.date >= 0 ? cells[idx.date] : "",
-        monthStr: idx.month >= 0 ? cells[idx.month] : ""
-      });
-    }
-
-    function rowInThisMonth(r) {
-      const d = new Date(r.dateStr);
-      if (!isNaN(d.getTime())) {
-        return d.getMonth() === thisMonth && d.getFullYear() === thisYear;
-      }
-      const m = (r.monthStr || "").toLowerCase();
-      return m.indexOf(monthNames[thisMonth]) !== -1 && m.indexOf(String(thisYear)) !== -1;
-    }
-
-    CAP_BILLS.forEach(function (bill) {
-      const key = String(bill.categoryId || "").trim().toLowerCase();
-      let matched = null;
-      if (key) {
-        for (let i = 0; i < rows.length; i++) {
-          const r = rows[i];
-          if (!rowInThisMonth(r)) continue;
-          if (String(r.catId).toLowerCase() === key) {
-            matched = r;
-            break;
-          }
-        }
-      }
-      bill.st = statusForBill(bill, matched);
-      if (matched && matched.amount != null) {
-        bill.amt = matched.amount;
-      }
-    });
-
+    const data = await res.json();
+    CAP_BILLS = Array.isArray(data.bills) ? data.bills : [];
     renderBills();
   } catch (err) {
-    console.warn("[capital] Transactions match failed:", err);
-    CAP_BILLS.forEach(function (b) { b.st = statusForBill(b, null); });
+    console.warn("[capital] bills fetch failed:", err);
     renderBills();
   }
+}
+
+function addBillViaEdit() {
+  const phrase = prompt("Bill to add (e.g. car note)");
+  if (phrase == null) return;
+  const q = phrase.trim();
+  if (!q) return;
+  fetch("/api/bills", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ phrase: q })
+  })
+    .then(function (res) {
+      return res.json().then(function (data) {
+        return { ok: res.ok, data: data };
+      });
+    })
+    .then(function (out) {
+      if (!out.ok) {
+        alert(out.data.error || "Could not match that bill on the sheet");
+        return;
+      }
+      fetchBillsFromServer();
+    })
+    .catch(function (err) {
+      console.warn("[capital] add bill failed:", err);
+      alert("Could not add bill");
+    });
 }
 
 function startBillSync() {
-  fetchTransactionsAndMatch();
-  setInterval(fetchTransactionsAndMatch, 60000);
-}
-
-/** Top-right Edit → add bill (Category ID, not transaction ID) */
-function addBillViaEdit() {
-  const name = prompt("Bill name (e.g. Car note)");
-  if (name == null) return;
-  const nameTrim = name.trim();
-  if (!nameTrim) return;
-
-  const amtStr = prompt("Amount (e.g. 406.50)", "");
-  if (amtStr == null) return;
-  const amt = parseMoney(amtStr);
-  if (!isFinite(amt) || amt < 0) {
-    alert("Enter a valid amount");
-    return;
-  }
-
-  const due = prompt("Due day of month (1–31)", "1");
-  if (due == null) return;
-  const dueDay = Math.max(1, Math.min(31, parseInt(due, 10) || 1));
-
-  const catId = prompt(
-    "Category ID from your sheet\n(e.g. LOAN_PAYMENTS_CAR_PAYMENT)\nStable each month — not the transaction ID",
-    ""
-  );
-  if (catId == null) return;
-
-  const typeAns = prompt("Type: Recurring or One-Time", "Recurring");
-  if (typeAns == null) return;
-  const type = /one/i.test(typeAns || "") ? "One-Time" : "Recurring";
-
-  CAP_BILLS.push({
-    name: nameTrim,
-    amt: amt,
-    dueDay: dueDay,
-    type: type,
-    categoryId: String(catId).trim(),
-    st: "pend"
-  });
-
-  renderBills();
-  fetchTransactionsAndMatch();
+  fetchBillsFromServer();
+  setInterval(fetchBillsFromServer, 20000);
 }
 
 function ensureBillEditButton() {
@@ -278,12 +176,10 @@ function ensureBillEditButton() {
     btn.onclick = addBillViaEdit;
     return;
   }
-
   const box = document.getElementById("capBills");
   if (!box) return;
   const card = box.closest(".cap-card") || box.parentElement;
   if (!card) return;
-
   let head = card.querySelector(".cap-card-h");
   if (!head) {
     head = document.createElement("div");
@@ -291,12 +187,10 @@ function ensureBillEditButton() {
     head.innerHTML = "<span>MONTHLY BILLS</span>";
     card.insertBefore(head, box);
   }
-
   card.querySelectorAll("button.cap-edit, button.cap-bill-edit").forEach(function (b) {
     if (b.id === "capBillEdit") return;
     if (b.closest(".cap-bill-h") || !b.closest(".cap-card-h")) b.remove();
   });
-
   if (!head.querySelector("#capBillEdit")) {
     btn = document.createElement("button");
     btn.type = "button";
@@ -311,14 +205,11 @@ function ensureBillEditButton() {
 function renderBills() {
   const box = document.getElementById("capBills");
   if (!box) return;
-
   ensureBillEditButton();
-
   let total = 0;
-
   if (!CAP_BILLS.length) {
     box.innerHTML =
-      '<div class="cap-bill-empty">No bills yet — tap Edit to add one</div>';
+      '<div class="cap-bill-empty">No bills yet — tap Edit or tell Hope in chat</div>';
   } else {
     box.innerHTML =
       '<div class="cap-bill-h">' +
@@ -332,20 +223,17 @@ function renderBills() {
             "<span>" + b.name + "</span>" +
             "<span>" + money(b.amt) + "</span>" +
             "<span>" + dueLabel(b.dueDay) + "</span>" +
-            "<span>" + b.type + "</span>" +
+            "<span>" + (b.type || "Recurring") + "</span>" +
             '<span class="st ' + b.st + '">' + label + "</span>" +
           "</div>"
         );
       }).join("");
   }
-
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
 }
 
 /* ── Interactive tickers ─────────────────────────────────────────────── */
-let holdings = [];
-
 function logoUrl(ticker) {
   return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
 }
@@ -359,7 +247,6 @@ function sparkHtml() {
 function renderHolds() {
   const box = document.getElementById("capHolds");
   if (!box) return;
-
   let html =
     '<div class="cap-ticker-search">' +
       '<input id="capTickerInput" type="text" placeholder="Add ticker (e.g. AAPL)" maxlength="10" autocomplete="off" />' +
@@ -368,7 +255,6 @@ function renderHolds() {
     '<div class="cap-hold cap-hold-h">' +
       "<span></span><span>Ticker</span><span>Price</span><span>Change</span><span></span>" +
     "</div>";
-
   if (!holdings.length) {
     html += '<div class="cap-hold-empty">No tickers yet — search above to add</div>';
   } else {
@@ -388,9 +274,7 @@ function renderHolds() {
         "</div>";
     });
   }
-
   box.innerHTML = html;
-
   box.querySelectorAll("img.tlogo").forEach(function (img) {
     img.addEventListener("error", function () {
       const letter = document.createElement("span");
@@ -399,7 +283,6 @@ function renderHolds() {
       img.replaceWith(letter);
     });
   });
-
   const input = document.getElementById("capTickerInput");
   const addBtn = document.getElementById("capTickerAdd");
   function tryAdd() {
@@ -419,14 +302,12 @@ function renderHolds() {
       }
     });
   }
-
   box.querySelectorAll(".cap-hold-rm").forEach(function (btn) {
     btn.addEventListener("click", function (e) {
       e.stopPropagation();
       removeTicker(btn.getAttribute("data-t"));
     });
   });
-
   let dragIdx = null;
   box.querySelectorAll(".cap-hold[draggable]").forEach(function (row) {
     row.addEventListener("dragstart", function (e) {
