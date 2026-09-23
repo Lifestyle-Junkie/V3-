@@ -84,8 +84,9 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time). That is home unless live coordinates say otherwise.
 - If a live GPS pin is included in this turn, treat that as Nick's exact current location for nearby, weather, traffic, and directions.
 - You have live tools: web_search, web_fetch, read_sheet, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
-- add_monthly_bill: when Nick says add a bill (car note, rent, phone), call it with the phrase. Do NOT ask amount, category ID, or type. dueDay is a fixed day-of-month. Status is Paid only if a matching transaction falls in the current cycle (last dueDay → next dueDay). Display due date is the next cycle end, not the last payment date. Only pass due_day if Nick explicitly gives a day.
-- update_monthly_bill / delete_monthly_bill: change or remove an existing bill by name or categoryId.
+- add_monthly_bill: add a bill from a phrase. Do NOT ask amount, category ID, or type. Each bill gets its own generated id. categoryId is only a tag — many bills can share one category. Same exact name updates that row; a different name always creates a new row.
+- update_monthly_bill / delete_monthly_bill: match by bill id first, then exact name. Never match only on categoryId.
+- dueDay is a fixed day-of-month. Status is Paid only if a matching transaction falls in the current cycle (last dueDay → next dueDay). Display due is cycle end.
 - read_sheet: live Accounts / Transactions / Holdings / Categories.
 - This chat is one thread. Use earlier turns. Do not invent that you browsed if you did not call a tool.
 - Nick can attach photos and files. If an image or document is in the message history, you can see it.
@@ -140,12 +141,12 @@ TOOLS = [
     },
     {
         "name": "add_monthly_bill",
-        "description": "Add or upsert a monthly bill from a short phrase. dueDay is fixed. Status uses the current dueDay cycle window, not any historical payment.",
+        "description": "Add a monthly bill. Unique key is generated bill id or exact name. categoryId is metadata only; multiple bills may share a category.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "phrase": {"type": "string"},
-                "due_day": {"type": "integer", "description": "Optional 1–31 override; locked after set"},
+                "due_day": {"type": "integer"},
                 "name": {"type": "string"},
             },
             "required": ["phrase"],
@@ -153,7 +154,7 @@ TOOLS = [
     },
     {
         "name": "update_monthly_bill",
-        "description": "Update an existing monthly bill by id, categoryId, or name.",
+        "description": "Update a bill by generated id first, then exact name. Do not key off categoryId.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -168,7 +169,7 @@ TOOLS = [
     },
     {
         "name": "delete_monthly_bill",
-        "description": "Delete a monthly bill by id, categoryId, or name.",
+        "description": "Delete a bill by generated id first, then exact name. Do not key off categoryId.",
         "input_schema": {
             "type": "object",
             "properties": {"id": {"type": "string"}},
@@ -364,6 +365,13 @@ def save_bills(bills):
     BILLS_FILE.write_text(json.dumps(bills, indent=2), encoding="utf-8")
 
 
+def new_bill_id():
+    return "bill_%s_%04d" % (
+        datetime.now().strftime("%Y%m%d%H%M%S"),
+        int(time.time() * 1000) % 10000,
+    )
+
+
 def score_category(phrase, cat):
     p = (phrase or "").strip().lower()
     p = ALIASES.get(p, p)
@@ -400,17 +408,6 @@ def txn_matches_cat(row, cat_id):
     return str(row.get("Category ID") or "").strip().upper() == str(cat_id or "").strip().upper()
 
 
-def existing_due_day(cat_id):
-    key = str(cat_id or "").lower()
-    if not key:
-        return None
-    for bill in load_bills():
-        ek = str(bill.get("categoryId") or bill.get("id") or "").lower()
-        if ek == key and bill.get("dueDay"):
-            return int(bill.get("dueDay"))
-    return None
-
-
 def infer_bill(phrase, display_name=None, due_day_override=None):
     phrase = (phrase or "").strip()
     if not phrase:
@@ -445,17 +442,13 @@ def infer_bill(phrase, display_name=None, due_day_override=None):
     dated.sort(key=lambda r: r["date"], reverse=True)
     latest = dated[0] if dated else None
 
-    locked = existing_due_day(cat_id)
     if due_day_override is not None:
         try:
             due_day = max(1, min(31, int(due_day_override)))
             due_source = "override"
         except Exception:
-            due_day = locked or (latest["date"].day if latest else 1)
-            due_source = "locked" if locked else "seed"
-    elif locked:
-        due_day = locked
-        due_source = "locked"
+            due_day = latest["date"].day if latest else 1
+            due_source = "seed"
     elif latest:
         due_day = latest["date"].day
         due_source = "seed"
@@ -474,16 +467,17 @@ def infer_bill(phrase, display_name=None, due_day_override=None):
     else:
         st = "over" if now >= end else "pend"
 
-    label = (display_name or phrase).strip()
-    if phrase.lower() in ("car note", "car loan", "ford", "ford credit"):
-        label = "Car note"
-    elif not display_name and phrase.lower() == cat_name.lower():
-        label = cat_name
+    if display_name:
+        label = str(display_name).strip()
     else:
-        label = label.title()
+        label = phrase.strip()
+        if label.lower() == cat_name.lower():
+            label = cat_name
+        else:
+            label = label.title()
 
     return {
-        "id": cat_id or re.sub(r"[^a-z0-9]+", "-", phrase.lower()).strip("-"),
+        "id": new_bill_id(),
         "name": label,
         "amt": amt,
         "dueDay": due_day,
@@ -501,21 +495,37 @@ def infer_bill(phrase, display_name=None, due_day_override=None):
 
 def upsert_bill(bill):
     bills = load_bills()
-    key = (bill.get("categoryId") or bill.get("id") or "").lower()
-    replaced = False
-    for i, existing in enumerate(bills):
-        ek = (existing.get("categoryId") or existing.get("id") or "").lower()
-        if ek and ek == key:
-            if existing.get("dueDay") and bill.get("dueSource") not in ("override",):
-                bill["dueDay"] = existing.get("dueDay")
-                bill["dueSource"] = existing.get("dueSource") or "locked"
-            bills[i] = bill
-            replaced = True
-            break
-    if not replaced:
-        bills.append(bill)
+    idx = -1
+    bid = str(bill.get("id") or "").strip().lower()
+    name = str(bill.get("name") or "").strip().lower()
+    if bid and not bid.startswith("bill_"):
+        bid = ""
+    if bid:
+        for i, existing in enumerate(bills):
+            if str(existing.get("id") or "").strip().lower() == bid:
+                idx = i
+                break
+    if idx < 0 and name:
+        for i, existing in enumerate(bills):
+            if str(existing.get("name") or "").strip().lower() == name:
+                idx = i
+                break
+    if idx >= 0:
+        keep_id = bills[idx].get("id") or bill.get("id") or new_bill_id()
+        keep_due = bills[idx].get("dueDay")
+        keep_src = bills[idx].get("dueSource")
+        bill["id"] = keep_id
+        if keep_due and bill.get("dueSource") != "override":
+            bill["dueDay"] = keep_due
+            bill["dueSource"] = keep_src or "locked"
+        bills[idx] = bill
+        save_bills(bills)
+        return bill, True
+    if not bill.get("id") or not str(bill.get("id")).startswith("bill_"):
+        bill["id"] = new_bill_id()
+    bills.append(bill)
     save_bills(bills)
-    return bill, replaced
+    return bill, False
 
 
 def refresh_bill_statuses(bills):
@@ -527,6 +537,8 @@ def refresh_bill_statuses(bills):
     now = datetime.now()
     out = []
     for bill in bills:
+        if not str(bill.get("id") or "").startswith("bill_"):
+            bill["id"] = new_bill_id()
         cat_id = bill.get("categoryId") or ""
         due_day = int(bill.get("dueDay") or 1)
         start, end = cycle_window(due_day, now)
@@ -580,7 +592,7 @@ def add_monthly_bill(phrase, due_day=None, name=None):
         "ok": True,
         "action": "updated" if replaced else "added",
         "bill": saved,
-        "note": "dueDay is fixed. Status is Paid only if a txn is in the current cycle window.",
+        "note": "Unique key is bill id / exact name. categoryId is a tag only.",
     }, ensure_ascii=False)
 
 
@@ -589,23 +601,10 @@ def find_bill(bills, key):
     if not k:
         return -1
     for i, b in enumerate(bills):
-        if str(b.get("id") or "").lower() == k:
+        if str(b.get("id") or "").strip().lower() == k:
             return i
-        if str(b.get("categoryId") or "").lower() == k:
-            return i
-        if str(b.get("name") or "").lower() == k:
-            return i
-        if str(b.get("categoryName") or "").lower() == k:
-            return i
-    aliases = {"car note": "car payment", "ford": "car payment", "car loan": "car payment"}
-    k2 = aliases.get(k, k)
     for i, b in enumerate(bills):
-        blob = " ".join([
-            str(b.get("name") or ""),
-            str(b.get("categoryName") or ""),
-            str(b.get("categoryId") or "").replace("_", " "),
-        ]).lower()
-        if k2 in blob:
+        if str(b.get("name") or "").strip().lower() == k:
             return i
     return -1
 
@@ -1127,7 +1126,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400, {"error": "Bad JSON"})
                 return
             raw = update_monthly_bill(
-                body.get("id") or body.get("phrase") or "",
+                body.get("id") or body.get("phrase") or body.get("name") or "",
                 body.get("name"),
                 body.get("due_day") if "due_day" in body else body.get("dueDay"),
                 body.get("amount") if "amount" in body else body.get("amt"),
