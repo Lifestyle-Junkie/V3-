@@ -791,6 +791,16 @@ def chat_with_tools(user_messages, extra=""):
             results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
+def short_spoken(text):
+    t = re.sub(r"(?is)\n*Sources:.*", "", text or "").strip()
+    t = re.sub(r"[*_`#]+", "", t)
+    t = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    parts = [p.strip() for p in re.split(r"(?<=[.!?])\s+", t) if p.strip()]
+    recap = " ".join(parts[:2]) if parts else t
+    if len(recap) > 280:
+        recap = recap[:277].rsplit(" ", 1)[0].rstrip(".,;:") + "."
+    return recap or t[:200]
 def speak_text(text):
     if not ELEVEN_KEY:
         return None, "ELEVENLABS_API_KEY is not set"
@@ -1070,7 +1080,10 @@ class Handler(SimpleHTTPRequestHandler):
         if not text:
             self._json(400, {"error": "text required"})
             return
-        spoken = re.sub(r"(?is)\n*Sources:.*", "", text).strip() or text
+        spoken = short_spoken(text)
+        if not spoken:
+            self._json(400, {"error": "text required"})
+            return
         audio, err = speak_text(spoken)
         if err or not audio:
             self._json(502, {"error": err or "Voice failed"})
