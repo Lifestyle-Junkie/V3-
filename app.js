@@ -564,6 +564,10 @@ function insertChatMusicCard() {
   thread.appendChild(line);
   thread.scrollTop = thread.scrollHeight;
 }
+function sayHope(text) {
+  const fn = window.speakHope || speakHope;
+  if (typeof fn === "function" && text) fn(text);
+}
 async function sendUserText(text) {
   text = (text || "").trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -605,7 +609,7 @@ async function sendUserText(text) {
     } catch (err) {
       addLine("Hope", "Couldn't find that on SoundCloud.", "bot");
       topic.messages.push({ role: "assistant", content: "Couldn't find that on SoundCloud." });
-      if (typeof speakHope === "function") speakHope("Couldn't find that on SoundCloud, sir.");
+      sayHope("Couldn't find that on SoundCloud, sir.");
     }
     saveChatHistory();
     busy = false;
@@ -663,8 +667,8 @@ async function sendUserText(text) {
     if (data.text) {
       topic.messages.push({ role: "assistant", content: data.text });
       saveChatHistory();
-      if (typeof speakHope === "function") speakHope(data.text);
     }
+    sayHope(data.text || reply);
   } catch (err) {
     stopThink(waiting);
     if (waiting) waiting.textContent = "Can't reach backend.";
