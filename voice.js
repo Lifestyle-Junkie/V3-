@@ -3,109 +3,53 @@ let hopeVoice = null;
 let micOn = false;
 let rec = null;
 let wakeRec = null;
-
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
-
 function setOrbTalking(on) {
   const orb = document.querySelector(".orb-wrap");
   if (orb) orb.classList.toggle("speaking", !!on);
 }
-
 function stripWake(text) {
   return (text || "")
     .replace(/^\s*(hey\s+)?hope[,.\s]*/i, "")
     .trim();
 }
-
-function cleanSpeakText(text) {
-  let spoken = String(text || "");
-  if (typeof parseSources === "function") {
-    try {
-      const parsed = parseSources(spoken);
-      spoken = (parsed && parsed.body) || spoken;
-    } catch (e) {}
-  }
-  if (typeof stripMd === "function") {
-    try {
-      spoken = stripMd(spoken);
-    } catch (e) {}
-  }
-  spoken = spoken.replace(/\n*Sources:[\s\S]*/i, "").trim();
-  return spoken;
-}
-
-function speakBrowser(text) {
-  if (!window.speechSynthesis || !text) return false;
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text.slice(0, 280));
-    u.lang = "en-US";
-    u.rate = 1;
-    u.onstart = () => setOrbTalking(true);
-    u.onend = () => setOrbTalking(false);
-    u.onerror = () => setOrbTalking(false);
-    window.speechSynthesis.speak(u);
-    return true;
-  } catch (e) {
-    setOrbTalking(false);
-    return false;
-  }
-}
-
 async function speakHope(text) {
-  if (!voiceOn) return;
-  const spoken = cleanSpeakText(text);
-  if (!spoken) return;
+  if (!voiceOn || !text) return;
   try {
     if (hopeVoice) {
       hopeVoice.pause();
       hopeVoice.src = "";
     }
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
+    let spoken = String(text);
+    try {
+      if (typeof parseSources === "function") spoken = parseSources(spoken).body || spoken;
+      if (typeof stripMd === "function") spoken = stripMd(spoken);
+    } catch (e) {}
+    spoken = String(spoken || text).replace(/\n*Sources:[\s\S]*/i, "").trim();
+    if (!spoken) return;
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: spoken.slice(0, 1200) }),
     });
-    if (!res.ok) {
-      console.warn("[hope voice] /api/speak", res.status);
-      speakBrowser(spoken);
-      return;
-    }
+    if (!res.ok) return;
     const blob = await res.blob();
-    if (!blob || blob.size < 100) {
-      console.warn("[hope voice] empty audio");
-      speakBrowser(spoken);
-      return;
-    }
-    const url = URL.createObjectURL(blob);
-    hopeVoice = new Audio(url);
-    hopeVoice.onended = () => {
-      setOrbTalking(false);
-      URL.revokeObjectURL(url);
-    };
-    hopeVoice.onerror = () => {
-      setOrbTalking(false);
-      URL.revokeObjectURL(url);
-      speakBrowser(spoken);
-    };
+    hopeVoice = new Audio(URL.createObjectURL(blob));
     setOrbTalking(true);
+    hopeVoice.onended = () => setOrbTalking(false);
+    hopeVoice.onerror = () => setOrbTalking(false);
     await hopeVoice.play();
   } catch (err) {
-    console.warn("[hope voice]", err);
     setOrbTalking(false);
-    speakBrowser(spoken);
   }
 }
 window.speakHope = speakHope;
-
 function setMicLook(on) {
   const wrap = document.querySelector(".search");
   if (wrap) wrap.classList.toggle("listening", on);
 }
-
 function startMic(commandMode) {
   const Ctor = SpeechEngine();
   if (!Ctor) return;
@@ -132,26 +76,22 @@ function startMic(commandMode) {
   micOn = true;
   setMicLook(true);
 }
-
 function stopMic() {
   try { if (rec) rec.stop(); } catch (e) {}
   rec = null;
   micOn = false;
   setMicLook(false);
 }
-
 function bindVoiceUi() {
   const voiceToggle = document.querySelector(".toggle");
   if (voiceToggle) {
     voiceToggle.classList.add("on");
-    voiceOn = true;
     voiceToggle.addEventListener("click", () => {
       voiceOn = !voiceOn;
       voiceToggle.classList.toggle("on", voiceOn);
       if (!voiceOn) {
         setOrbTalking(false);
         if (hopeVoice) hopeVoice.pause();
-        if (window.speechSynthesis) window.speechSynthesis.cancel();
       }
     });
   }
@@ -165,7 +105,6 @@ function bindVoiceUi() {
     });
   }
 }
-
 function startWake() {
   const Ctor = SpeechEngine();
   if (!Ctor || wakeRec) return;
@@ -186,7 +125,6 @@ function startWake() {
   };
   try { wakeRec.start(); } catch (e) {}
 }
-
 bindVoiceUi();
 document.addEventListener("click", function once() {
   startWake();
