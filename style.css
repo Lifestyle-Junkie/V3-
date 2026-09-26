@@ -272,9 +272,9 @@ aside.right::-webkit-scrollbar { display: none; }
 }
 .search input[type="text"] {
   flex: 1; background: transparent; border: 0; outline: 0;
-  color: var(--text); font-size: 13px; font-family: inherit; user-select: text;
+  color: var(--text); font-size: 16px; font-family: inherit; user-select: text;
 }
-.search input::placeholder { color: #6d84a4; }
+.search input::placeholder { color: #6d84a4; font-size: 16px; }
 .mic, .attach {
   width: 30px; height: 30px; border-radius: 50%;
   background: transparent; border: 0; color: #9bb6d4;
@@ -452,9 +452,9 @@ aside.right::-webkit-scrollbar { display: none; }
   flex: 1; height: 30px; border-radius: 10px;
   border: 1px solid rgba(130,190,255,0.28);
   background: rgba(8,16,32,0.88); color: #e8f1ff; padding: 0 10px;
-  font: 12px Inter, sans-serif; outline: 0;
+  font: 16px Inter, sans-serif; outline: 0;
 }
-.mini-map-search input::placeholder { color: #6d84a4; }
+.mini-map-search input::placeholder { color: #6d84a4; font-size: 16px; }
 .mini-map-search button {
   height: 30px; padding: 0 10px; border-radius: 10px;
   border: 1px solid rgba(130,190,255,0.28);
