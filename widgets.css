@@ -480,8 +480,6 @@ img.rh-mark {
   color: #e8f1ff;
   background: rgba(80,150,255,0.1);
 }
-
-/* ── Holdings / interactive tickers ─────────────────────────────────── */
 .cap-holds { display: flex; flex-direction: column; gap: 0; }
 .cap-ticker-search {
   display: flex;
@@ -705,8 +703,6 @@ img.rh-mark {
 .cap-alloc-leg b { display: block; color: #e8f1ff; margin-top: 2px; font-weight: 600; }
 .cap-rail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: auto; scrollbar-width: none; }
 .cap-rail::-webkit-scrollbar { display: none; }
-
-/* ── Monthly bills (scroll + empty; no row pencils) ─────────────────── */
 .cap-bills {
   font-size: 11px;
   display: flex;
@@ -827,11 +823,42 @@ img.rh-mark {
   margin: 0;
   white-space: nowrap;
 }
-.cap-bar { height: 8px; border-radius: 8px; background: rgba(120,180,255,0.12); overflow: hidden; }
-.cap-bar i { display: block; height: 100%; background: linear-gradient(90deg, #3ee07a, #7ecbff); }
-.cap-months { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 10px; }
-.cap-mo { text-align: center; font-size: 10px; color: #8aa0bf; }
+.cap-bar {
+  height: 8px;
+  border-radius: 8px;
+  background: rgba(120,180,255,0.12);
+  overflow: hidden;
+}
+.cap-bar i,
+#capGoalBar {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #3ee07a, #7ecbff);
+  transition: width 0.7s ease;
+}
+.cap-months {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.cap-mo {
+  flex: 0 0 auto;
+  min-width: 56px;
+  text-align: center;
+  font-size: 10px;
+  color: #8aa0bf;
+  padding: 6px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
 .cap-mo b { display: block; color: #e8f1ff; margin-top: 4px; }
+.cap-mo.on {
+  color: #e8f1ff;
+  border-color: rgba(126,203,255,0.35);
+  background: rgba(40,80,140,0.28);
+}
 .cap-insights {
   display: flex;
   flex-direction: column;
