@@ -1,12 +1,4 @@
 /* ── Capital HUD ─────────────────────────────────────────────────────── */
-const CAP_MONTHS = [
-  { m: "Apr", v: 2000, ok: true },
-  { m: "May", v: 2200, ok: true },
-  { m: "Jun", v: 1200, ok: false },
-  { m: "Jul", v: 1800, ok: true },
-  { m: "Aug", v: 1500, ok: false },
-  { m: "Sep", v: 1500, ok: false }
-];
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
 const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
@@ -14,6 +6,7 @@ const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
 const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DUMMY_MONTHS = { Apr: 2000, May: 2200, Jun: 1200, Jul: 1800, Aug: 1500, Sep: 1500 };
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
 let CAP_BILLS = [];
@@ -24,7 +17,7 @@ let CAP_GOAL = {
   includeCash: true,
   monthKey: "",
   monthStartPile: null,
-  months: CAP_MONTHS.slice()
+  months: []
 };
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
@@ -50,6 +43,14 @@ function currentMonthName() {
 function pileNow() {
   const cash = getCashFromDom();
   return CAP_GOAL.includeCash ? (liveRhTotal + cash) : liveRhTotal;
+}
+function cleanMonths(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(function (m) {
+    if (!m || !m.m) return false;
+    if (DUMMY_MONTHS[m.m] != null && Number(m.v) === DUMMY_MONTHS[m.m]) return false;
+    return true;
+  });
 }
 function goalSnapshot() {
   const saved = pileNow();
@@ -140,7 +141,7 @@ function applyGoalPayload(data) {
   if (typeof data.includeCash === "boolean") CAP_GOAL.includeCash = data.includeCash;
   if (data.monthKey) CAP_GOAL.monthKey = data.monthKey;
   if (isFinite(data.monthStartPile)) CAP_GOAL.monthStartPile = Number(data.monthStartPile);
-  if (Array.isArray(data.months) && data.months.length) CAP_GOAL.months = data.months;
+  if (Array.isArray(data.months)) CAP_GOAL.months = cleanMonths(data.months);
 }
 async function fetchGoalFromServer() {
   try {
@@ -162,17 +163,21 @@ function rollGoalMonth() {
   if (!CAP_GOAL.monthKey) {
     CAP_GOAL.monthKey = key;
     if (CAP_GOAL.monthStartPile == null) CAP_GOAL.monthStartPile = saved;
+    CAP_GOAL.months = cleanMonths(CAP_GOAL.months);
     return;
   }
   if (CAP_GOAL.monthKey === key) {
     if (CAP_GOAL.monthStartPile == null) CAP_GOAL.monthStartPile = saved;
+    CAP_GOAL.months = cleanMonths(CAP_GOAL.months);
     return;
   }
   const parts = String(CAP_GOAL.monthKey).split("-");
   const oldName = MONTH_NAMES[Math.max(0, (Number(parts[1]) || 1) - 1)] || "Prev";
   const added = saved - (CAP_GOAL.monthStartPile || saved);
   const ok = added >= (Number(CAP_GOAL.monthly) || 0);
-  CAP_GOAL.months = (CAP_GOAL.months || []).concat([{ m: oldName, v: Math.round(added), ok: ok }]).slice(-6);
+  CAP_GOAL.months = cleanMonths(CAP_GOAL.months || [])
+    .concat([{ m: oldName, v: Math.round(added), ok: ok }])
+    .slice(-6);
   CAP_GOAL.monthKey = key;
   CAP_GOAL.monthStartPile = saved;
   saveGoalToServer();
@@ -651,12 +656,12 @@ function renderAlloc(rh, cash, net) {
 function renderMonths(snap) {
   const box = document.getElementById("capMonths");
   if (!box) return;
-  const cur = currentMonthName();
-  const rows = (CAP_GOAL.months || CAP_MONTHS).slice(-5);
   const s = snap || goalSnapshot();
+  const cur = currentMonthName();
   const curOk = s.pace !== "Behind";
   const curVal = Math.round(s.addedThisMonth || 0);
-  let html = rows.filter(function (m) { return m.m !== cur; }).map(function (m) {
+  const past = cleanMonths(CAP_GOAL.months).filter(function (m) { return m.m !== cur; });
+  let html = past.map(function (m) {
     return '<div class="cap-mo">' + m.m + "<b>" + (m.ok ? "✓" : "✕") + " $" + Number(m.v).toLocaleString() + "</b></div>";
   }).join("");
   html += '<div class="cap-mo on">' + cur + "<b>" + (curOk ? "✓" : "✕") + " $" + Number(curVal).toLocaleString() + "</b></div>";
