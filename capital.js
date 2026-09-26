@@ -13,20 +13,86 @@ const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
   "/gviz/tq?tqx=out:csv&sheet=Accounts";
+const MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 let liveRhTotal = 3948.34;
 let liveCash = 2500;
 let CAP_BILLS = [];
 let holdings = [];
+let CAP_GOAL = {
+  goal: 25000,
+  monthly: 2200,
+  includeCash: true,
+  monthKey: "",
+  monthStartPile: null,
+  months: CAP_MONTHS.slice()
+};
 function money(n) {
   return "$" + Number(n).toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2
   });
 }
+function moneyShort(n) {
+  return money(n).replace(/\.00$/, "");
+}
 function parseMoney(str) {
   if (str == null) return NaN;
   const cleaned = String(str).replace(/[^0-9.\-]/g, "");
   return Number(cleaned);
+}
+function currentMonthKey() {
+  const d = new Date();
+  return d.getFullYear() + "-" + String(d.getMonth() + 1).padStart(2, "0");
+}
+function currentMonthName() {
+  return MONTH_NAMES[new Date().getMonth()];
+}
+function pileNow() {
+  const cash = getCashFromDom();
+  return CAP_GOAL.includeCash ? (liveRhTotal + cash) : liveRhTotal;
+}
+function goalSnapshot() {
+  const saved = pileNow();
+  const goal = Number(CAP_GOAL.goal) || 0;
+  const monthly = Number(CAP_GOAL.monthly) || 0;
+  const gap = Math.max(0, goal - saved);
+  const pct = goal > 0 ? (saved / goal) * 100 : 0;
+  let monthsLeft = 0;
+  let hitLabel = "Now";
+  if (gap <= 0) {
+    monthsLeft = 0;
+    hitLabel = "Hit";
+  } else if (monthly > 0) {
+    monthsLeft = Math.ceil(gap / monthly);
+    const d = new Date();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + monthsLeft);
+    hitLabel = MONTH_NAMES[d.getMonth()] + " " + d.getFullYear();
+  } else {
+    hitLabel = "Set monthly";
+  }
+  const start = CAP_GOAL.monthStartPile;
+  const added = start == null ? 0 : saved - start;
+  const behindBy = monthly > 0 ? monthly - added : 0;
+  const pace = start == null ? "—" : (added >= monthly ? "On pace" : "Behind");
+  return {
+    goal: goal,
+    monthly: monthly,
+    includeCash: !!CAP_GOAL.includeCash,
+    saved: saved,
+    rh: liveRhTotal,
+    cash: getCashFromDom(),
+    gap: gap,
+    pct: pct,
+    monthsLeft: monthsLeft,
+    hitLabel: hitLabel,
+    month: currentMonthName(),
+    monthKey: currentMonthKey(),
+    monthStartPile: start,
+    addedThisMonth: added,
+    behindBy: behindBy > 0 ? behindBy : 0,
+    pace: pace
+  };
 }
 function getCashFromDom() {
   const el = document.getElementById("capCashVal");
@@ -41,6 +107,15 @@ function saveCashToServer(n) {
     body: JSON.stringify({ cash: n })
   }).catch(function (err) {
     console.warn("[capital] cash save failed:", err);
+  });
+}
+function saveGoalToServer() {
+  fetch("/api/goal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(CAP_GOAL)
+  }).catch(function (err) {
+    console.warn("[capital] goal save failed:", err);
   });
 }
 async function fetchCashFromServer() {
@@ -58,6 +133,50 @@ async function fetchCashFromServer() {
     console.warn("[capital] cash fetch failed:", err);
   }
 }
+function applyGoalPayload(data) {
+  if (!data || typeof data !== "object") return;
+  if (isFinite(data.goal)) CAP_GOAL.goal = Number(data.goal);
+  if (isFinite(data.monthly)) CAP_GOAL.monthly = Number(data.monthly);
+  if (typeof data.includeCash === "boolean") CAP_GOAL.includeCash = data.includeCash;
+  if (data.monthKey) CAP_GOAL.monthKey = data.monthKey;
+  if (isFinite(data.monthStartPile)) CAP_GOAL.monthStartPile = Number(data.monthStartPile);
+  if (Array.isArray(data.months) && data.months.length) CAP_GOAL.months = data.months;
+}
+async function fetchGoalFromServer() {
+  try {
+    const res = await fetch("/api/goal?_=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    applyGoalPayload(data.goal || data);
+    rollGoalMonth();
+    renderGoal();
+  } catch (err) {
+    console.warn("[capital] goal fetch failed:", err);
+    rollGoalMonth();
+    renderGoal();
+  }
+}
+function rollGoalMonth() {
+  const key = currentMonthKey();
+  const saved = pileNow();
+  if (!CAP_GOAL.monthKey) {
+    CAP_GOAL.monthKey = key;
+    if (CAP_GOAL.monthStartPile == null) CAP_GOAL.monthStartPile = saved;
+    return;
+  }
+  if (CAP_GOAL.monthKey === key) {
+    if (CAP_GOAL.monthStartPile == null) CAP_GOAL.monthStartPile = saved;
+    return;
+  }
+  const parts = String(CAP_GOAL.monthKey).split("-");
+  const oldName = MONTH_NAMES[Math.max(0, (Number(parts[1]) || 1) - 1)] || "Prev";
+  const added = saved - (CAP_GOAL.monthStartPile || saved);
+  const ok = added >= (Number(CAP_GOAL.monthly) || 0);
+  CAP_GOAL.months = (CAP_GOAL.months || []).concat([{ m: oldName, v: Math.round(added), ok: ok }]).slice(-6);
+  CAP_GOAL.monthKey = key;
+  CAP_GOAL.monthStartPile = saved;
+  saveGoalToServer();
+}
 function updateNetWorthUI(rh, cash) {
   const net = rh + cash;
   const rhEl = document.getElementById("capRhVal");
@@ -67,6 +186,7 @@ function updateNetWorthUI(rh, cash) {
   if (netEl) netEl.textContent = money(net);
   if (pieEl) pieEl.textContent = money(net);
   renderAlloc(rh, cash, net);
+  renderGoal();
 }
 function parseCsvLine(line) {
   const cols = line.match(/(".*?"|[^,]*)/g) || [];
@@ -123,7 +243,7 @@ function startLiveSync() {
   setInterval(fetchRobinhoodTotal, 60000);
 }
 function dueLabel(bill) {
-  const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const months = MONTH_NAMES;
   const iso = bill && bill.cycleEnd;
   if (iso) {
     const d = new Date(String(iso).slice(0, 10) + "T00:00:00");
@@ -258,6 +378,71 @@ function renderBills() {
   }
   const tot = document.getElementById("capBillTotal");
   if (tot) tot.textContent = money(total).replace(".00", "");
+}
+function editGoal() {
+  const g = prompt("Target goal", String(CAP_GOAL.goal));
+  if (g == null) return;
+  const goal = parseMoney(g);
+  if (!isFinite(goal) || goal <= 0) return;
+  const m = prompt("Save per month", String(CAP_GOAL.monthly));
+  if (m == null) return;
+  const monthly = parseMoney(m);
+  if (!isFinite(monthly) || monthly < 0) return;
+  const inc = prompt("Count cash on hand? yes / no", CAP_GOAL.includeCash ? "yes" : "no");
+  if (inc == null) return;
+  CAP_GOAL.goal = goal;
+  CAP_GOAL.monthly = monthly;
+  CAP_GOAL.includeCash = !/^n/i.test(String(inc).trim());
+  rollGoalMonth();
+  saveGoalToServer();
+  renderGoal();
+}
+function ensureGoalEditButton() {
+  let btn = document.getElementById("capGoalEdit");
+  if (btn) { btn.onclick = editGoal; return; }
+  const note = document.getElementById("capGoalNote");
+  const card = note ? (note.closest(".cap-card") || note.parentElement) : null;
+  if (!card) return;
+  const head = card.querySelector(".cap-card-h");
+  if (!head) return;
+  head.querySelectorAll("button.cap-edit").forEach(function (b) {
+    if (!b.id) {
+      b.id = "capGoalEdit";
+      b.addEventListener("click", editGoal);
+    }
+  });
+  btn = document.getElementById("capGoalEdit");
+  if (!btn) {
+    btn = document.createElement("button");
+    btn.type = "button";
+    btn.id = "capGoalEdit";
+    btn.className = "cap-edit";
+    btn.textContent = "Edit Goal";
+    btn.addEventListener("click", editGoal);
+    head.appendChild(btn);
+  }
+}
+function renderGoal() {
+  rollGoalMonth();
+  ensureGoalEditButton();
+  const s = goalSnapshot();
+  const goalEl = document.getElementById("capGoal");
+  const needEl = document.getElementById("capGoalNeed");
+  const haveEl = document.getElementById("capGoalHave");
+  const bar = document.getElementById("capGoalBar");
+  const note = document.getElementById("capGoalNote");
+  if (goalEl) goalEl.textContent = moneyShort(s.goal);
+  if (needEl) needEl.textContent = moneyShort(s.monthly);
+  if (haveEl) haveEl.textContent = moneyShort(s.saved);
+  if (bar) bar.style.width = Math.max(0, Math.min(100, s.pct)) + "%";
+  if (note) {
+    const pctTxt = s.pct.toFixed(0) + "%";
+    let paceTxt = s.pace;
+    if (s.pace === "Behind") paceTxt = "Behind by " + moneyShort(s.behindBy);
+    else if (s.pace === "On pace") paceTxt = "On pace · " + s.month;
+    note.textContent = pctTxt + " · " + paceTxt + " · " + s.hitLabel;
+  }
+  renderMonths(s);
 }
 function logoUrl(ticker) {
   return "https://financialmodelingprep.com/image-stock/" + ticker.toUpperCase() + ".png";
@@ -463,12 +648,19 @@ function renderAlloc(rh, cash, net) {
       "<div><i class='cash'></i>Cash " + cashPct + "%<b>" + money(cash) + "</b></div>" +
     "</div>";
 }
-function renderMonths() {
+function renderMonths(snap) {
   const box = document.getElementById("capMonths");
   if (!box) return;
-  box.innerHTML = CAP_MONTHS.map(function (m) {
-    return '<div class="cap-mo">' + m.m + "<b>" + (m.ok ? "✓" : "✕") + " $" + m.v.toLocaleString() + "</b></div>";
+  const cur = currentMonthName();
+  const rows = (CAP_GOAL.months || CAP_MONTHS).slice(-5);
+  const s = snap || goalSnapshot();
+  const curOk = s.pace !== "Behind";
+  const curVal = Math.round(s.addedThisMonth || 0);
+  let html = rows.filter(function (m) { return m.m !== cur; }).map(function (m) {
+    return '<div class="cap-mo">' + m.m + "<b>" + (m.ok ? "✓" : "✕") + " $" + Number(m.v).toLocaleString() + "</b></div>";
   }).join("");
+  html += '<div class="cap-mo on">' + cur + "<b>" + (curOk ? "✓" : "✕") + " $" + Number(curVal).toLocaleString() + "</b></div>";
+  box.innerHTML = html;
 }
 function renderInsights() {
   const box = document.getElementById("capInsights");
@@ -490,10 +682,11 @@ function bootCapital() {
   renderHolds();
   renderAlloc();
   renderBills();
-  renderMonths();
+  renderGoal();
   renderInsights();
   fetchCashFromServer();
   fetchHoldingsFromServer();
+  fetchGoalFromServer();
   document.querySelectorAll("[data-cap-tab]").forEach(function (btn) {
     btn.addEventListener("click", function () {
       document.querySelectorAll("[data-cap-tab]").forEach(function (b) { b.classList.remove("on"); });
@@ -519,6 +712,7 @@ function bootCapital() {
       if (el) el.textContent = money(n);
       updateNetWorthUI(liveRhTotal, n);
       saveCashToServer(n);
+      renderGoal();
     });
   }
   startLiveSync();
@@ -535,5 +729,6 @@ function goToCapitalTab() {
     layout.classList.add("capital-mode");
   }
 }
+window.goalSnapshot = goalSnapshot;
 if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bootCapital);
 else bootCapital();
