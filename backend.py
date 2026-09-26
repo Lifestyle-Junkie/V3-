@@ -60,6 +60,8 @@ HOLDINGS_FILE = DIR / "hope-holdings.json"
 CASH_FILE = DIR / "hope-cash.json"
 CHAT_FILE = DIR / "hope-chat.json"
 GOAL_FILE = DIR / "hope-goal.json"
+INSIGHTS_FILE = DIR / "hope-insights.json"
+INSIGHT_TTL = 3600
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
@@ -347,14 +349,7 @@ def default_goal():
         "includeCash": True,
         "monthKey": "",
         "monthStartPile": None,
-        "months": [
-            {"m": "Apr", "v": 2000, "ok": True},
-            {"m": "May", "v": 2200, "ok": True},
-            {"m": "Jun", "v": 1200, "ok": False},
-            {"m": "Jul", "v": 1800, "ok": True},
-            {"m": "Aug", "v": 1500, "ok": False},
-            {"m": "Sep", "v": 1500, "ok": False},
-        ],
+        "months": [],
     }
 def load_goal():
     base = default_goal()
@@ -511,6 +506,77 @@ def read_capital():
         "holdings": holds,
         "savings_goal": snap,
     }, ensure_ascii=False)
+def load_insights_cache():
+    if not INSIGHTS_FILE.exists():
+        return None
+    try:
+        data = json.loads(INSIGHTS_FILE.read_text(encoding="utf-8"))
+        if time.time() - float(data.get("ts") or 0) < INSIGHT_TTL:
+            return data.get("rows") or []
+    except Exception:
+        return None
+    return None
+def save_insights_cache(rows):
+    INSIGHTS_FILE.write_text(json.dumps({"ts": time.time(), "rows": rows}, indent=2), encoding="utf-8")
+def claude_plain(messages, system, max_tokens=800):
+    payload = json.dumps({
+        "model": MODEL,
+        "max_tokens": max_tokens,
+        "system": system,
+        "messages": messages,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        API_URL, data=payload,
+        headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=90) as resp:
+            return json.loads(resp.read().decode("utf-8")), None
+    except urllib.error.HTTPError as e:
+        err = e.read().decode("utf-8", errors="replace")
+        try:
+            msg = json.loads(err).get("error", {}).get("message") or err
+        except Exception:
+            msg = err or str(e)
+        return None, msg
+    except Exception as e:
+        return None, str(e)
+def generate_insights(force=False):
+    cached = None if force else load_insights_cache()
+    if cached:
+        return {"ok": True, "cached": True, "rows": cached}
+    if not API_KEY:
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set", "rows": []}
+    cap = read_capital()
+    data, err = claude_plain(
+        [{"role": "user", "content": "Capital snapshot:\n" + cap}],
+        "You are Hope. From this live Capital snapshot write 4 useful insights for Nick. "
+        "Return ONLY a JSON array of objects: "
+        '{"tone":"up|down|warn|tip","title":"short","note":"one sentence action"}. '
+        "Use real numbers. No fake bills. No markdown. No sir.",
+        700,
+    )
+    if err or not data:
+        return {"ok": False, "error": err or "insight failed", "rows": load_insights_cache() or []}
+    raw = extract_text(data.get("content") or [])
+    rows = []
+    try:
+        m = re.search(r"\[.*\]", raw, re.S)
+        parsed = json.loads(m.group(0) if m else raw)
+        for r in parsed[:5]:
+            tone = str((r or {}).get("tone") or "tip").lower()
+            if tone not in ("up", "down", "warn", "tip"):
+                tone = "tip"
+            title = str((r or {}).get("title") or "").strip()
+            note = str((r or {}).get("note") or "").strip()
+            if title and note:
+                rows.append({"tone": tone, "title": title[:90], "note": note[:180]})
+    except Exception:
+        rows = []
+    if rows:
+        save_insights_cache(rows)
+    return {"ok": True, "cached": False, "rows": rows}
 def new_bill_id():
     return "bill_%s_%04d" % (
         datetime.now().strftime("%Y%m%d%H%M%S"),
@@ -1064,6 +1130,11 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/goal":
             self._json(200, goal_snapshot())
+            return
+        if path == "/api/insights":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            force = (qs.get("force") or [""])[0] == "1"
+            self._json(200, generate_insights(force=force))
             return
         if path == "/api/chat/history":
             self._json(200, load_chat())
