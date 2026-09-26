@@ -1,6 +1,7 @@
 /* ── Capital HUD ─────────────────────────────────────────────────────── */
 const WARN_ICO = "<svg viewBox='0 0 24 24'><path d='M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 22c-5.518 0-10-4.482-10-10s4.482-10 10-10 10 4.482 10 10-4.482 10-10 10zm-1-16h2v6h-2zm0 8h2v2h-2z'></path></svg>";
 const DOWN_ICO = "<svg viewBox='0 0 24 24'><path fill-rule='evenodd' clip-rule='evenodd' d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm4.28 10.28a.75.75 0 000-1.06l-3-3a.75.75 0 10-1.06 1.06l1.72 1.72H8.25a.75.75 0 000 1.5h5.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3z'></path></svg>";
+const UP_ICO = "<svg viewBox='0 0 24 24'><path d='M12 2.25c-5.385 0-9.75 4.365-9.75 9.75s4.365 9.75 9.75 9.75 9.75-4.365 9.75-9.75S17.385 2.25 12 2.25zm-.75 14.25v-6h1.5v6h-1.5zm0-8.25v-1.5h1.5v1.5h-1.5z'></path></svg>";
 const SHEET_ID = "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk";
 const SHEET_ACCOUNTS_CSV =
   "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
@@ -445,7 +446,7 @@ function renderGoal() {
     let paceTxt = s.pace;
     if (s.pace === "Behind") paceTxt = "Behind by " + moneyShort(s.behindBy);
     else if (s.pace === "On pace") paceTxt = "On pace · " + s.month;
-    note.textContent = pctTxt + " · " + paceTxt + " · " + s.hitLabel;
+    note.textContent = pctTxt + " · " + paceTxt + " · Hit " + s.hitLabel;
   }
   renderMonths(s);
 }
@@ -667,20 +668,37 @@ function renderMonths(snap) {
   html += '<div class="cap-mo on">' + cur + "<b>" + (curOk ? "✓" : "✕") + " $" + Number(curVal).toLocaleString() + "</b></div>";
   box.innerHTML = html;
 }
-function renderInsights() {
+function insightIcon(tone) {
+  if (tone === "warn") return WARN_ICO;
+  if (tone === "up" || tone === "tip") return UP_ICO;
+  return DOWN_ICO;
+}
+function renderInsights(rows) {
   const box = document.getElementById("capInsights");
   if (!box) return;
-  const rows = [
-    { tone: "down", title: "Insurance bill increased +$120 this month", note: "Your car insurance payment is higher than last month." },
-    { tone: "down", title: "Robinhood portfolio dipped −$200", note: "Mainly due to market dip in tech stocks." },
-    { tone: "warn", title: "Cash withdrawals higher than usual (−$150)", note: "More cash spent this month compared to average." },
-    { tone: "down", title: "Water bill marked overdue", note: "Sep 22 payment has not cleared yet." },
-    { tone: "warn", title: "Gym charge posts in 3 days", note: "Recurring $30 draft is coming up." }
+  const list = Array.isArray(rows) && rows.length ? rows : [
+    { tone: "tip", title: "Waiting on Hope", note: "Insights refresh from live Capital every hour." }
   ];
-  box.innerHTML = rows.map(function (r) {
-    const mark = r.tone === "warn" ? WARN_ICO : DOWN_ICO;
-    return '<div class="cap-ins ' + r.tone + '"><span class="cap-ins-ico">' + mark + "</span><div><b>" + r.title + "</b><span>" + r.note + "</span></div></div>";
+  box.innerHTML = list.map(function (r) {
+    const tone = r.tone === "up" || r.tone === "tip" || r.tone === "warn" ? r.tone : "down";
+    return '<div class="cap-ins ' + tone + '"><span class="cap-ins-ico">' + insightIcon(tone) + "</span><div><b>" +
+      (r.title || "") + "</b><span>" + (r.note || "") + "</span></div></div>";
   }).join("");
+}
+async function fetchInsights(force) {
+  try {
+    const url = "/api/insights" + (force ? "?force=1" : "") + (force ? "&" : "?") + "_=" + Date.now();
+    const res = await fetch(url.replace("?&", "?"), { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    if (Array.isArray(data.rows)) renderInsights(data.rows);
+  } catch (err) {
+    console.warn("[capital] insights fetch failed:", err);
+  }
+}
+function startInsightSync() {
+  fetchInsights(false);
+  setInterval(function () { fetchInsights(false); }, 60 * 60 * 1000);
 }
 function bootCapital() {
   drawCapChart();
@@ -723,6 +741,7 @@ function bootCapital() {
   startLiveSync();
   startQuoteSync();
   startBillSync();
+  startInsightSync();
 }
 function goToCapitalTab() {
   document.querySelectorAll(".nav-item").forEach(function (i) { i.classList.remove("active"); });
