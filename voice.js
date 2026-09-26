@@ -3,18 +3,40 @@ let hopeVoice = null;
 let micOn = false;
 let rec = null;
 let wakeRec = null;
+let listenHold = null;
+
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
+
 function setOrbTalking(on) {
   const orb = document.querySelector(".orb-wrap");
   if (orb) orb.classList.toggle("speaking", !!on);
 }
+
+function setListening(on) {
+  const orb = document.querySelector(".orb-wrap");
+  const wrap = document.querySelector(".search");
+  if (orb) orb.classList.toggle("listening", !!on);
+  if (wrap) wrap.classList.toggle("listening", !!on);
+  document.body.classList.toggle("hope-listening", !!on);
+  if (listenHold) {
+    clearTimeout(listenHold);
+    listenHold = null;
+  }
+  if (on) {
+    listenHold = setTimeout(function () {
+      if (!micOn) setListening(false);
+    }, 12000);
+  }
+}
+
 function stripWake(text) {
   return (text || "")
     .replace(/^\s*(hey\s+)?hope[,.\s]*/i, "")
     .trim();
 }
+
 async function speakHope(text) {
   if (!voiceOn || !text) return;
   try {
@@ -29,36 +51,34 @@ async function speakHope(text) {
     } catch (e) {}
     spoken = String(spoken || text).replace(/\n*Sources:[\s\S]*/i, "").trim();
     if (!spoken) return;
+    setListening(false);
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: spoken.slice(0, 1200) }),
+      body: JSON.stringify({ text: spoken.slice(0, 1200) })
     });
     if (!res.ok) return;
     const blob = await res.blob();
     hopeVoice = new Audio(URL.createObjectURL(blob));
     setOrbTalking(true);
-    hopeVoice.onended = () => setOrbTalking(false);
-    hopeVoice.onerror = () => setOrbTalking(false);
+    hopeVoice.onended = function () { setOrbTalking(false); };
+    hopeVoice.onerror = function () { setOrbTalking(false); };
     await hopeVoice.play();
   } catch (err) {
     setOrbTalking(false);
   }
 }
 window.speakHope = speakHope;
-function setMicLook(on) {
-  const wrap = document.querySelector(".search");
-  if (wrap) wrap.classList.toggle("listening", on);
-}
+
 function startMic(commandMode) {
   const Ctor = SpeechEngine();
   if (!Ctor) return;
-  stopMic();
+  stopMic(true);
   rec = new Ctor();
   rec.lang = "en-US";
   rec.interimResults = true;
   rec.continuous = false;
-  rec.onresult = ev => {
+  rec.onresult = function (ev) {
     let said = "";
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       said += ev.results[i][0].transcript;
@@ -70,27 +90,36 @@ function startMic(commandMode) {
       if (cleaned && typeof sendUserText === "function") sendUserText(cleaned);
     }
   };
-  rec.onend = () => { micOn = false; setMicLook(false); };
-  rec.onerror = () => { micOn = false; setMicLook(false); };
+  rec.onend = function () {
+    micOn = false;
+    if (!hopeVoice || hopeVoice.paused) setListening(false);
+  };
+  rec.onerror = function () {
+    micOn = false;
+    setListening(false);
+  };
   rec.start();
   micOn = true;
-  setMicLook(true);
+  setListening(true);
 }
-function stopMic() {
+
+function stopMic(keepLook) {
   try { if (rec) rec.stop(); } catch (e) {}
   rec = null;
   micOn = false;
-  setMicLook(false);
+  if (!keepLook) setListening(false);
 }
+
 function bindVoiceUi() {
   const voiceToggle = document.querySelector(".toggle");
   if (voiceToggle) {
     voiceToggle.classList.add("on");
-    voiceToggle.addEventListener("click", () => {
+    voiceToggle.addEventListener("click", function () {
       voiceOn = !voiceOn;
       voiceToggle.classList.toggle("on", voiceOn);
       if (!voiceOn) {
         setOrbTalking(false);
+        setListening(false);
         if (hopeVoice) hopeVoice.pause();
       }
     });
@@ -98,13 +127,14 @@ function bindVoiceUi() {
   const micBtn = document.getElementById("micBtn") || document.querySelector(".search .mic");
   if (micBtn) {
     micBtn.style.cursor = "pointer";
-    micBtn.addEventListener("click", e => {
+    micBtn.addEventListener("click", function (e) {
       e.preventDefault();
       if (micOn) stopMic();
       else startMic(false);
     });
   }
 }
+
 function startWake() {
   const Ctor = SpeechEngine();
   if (!Ctor || wakeRec) return;
@@ -112,19 +142,21 @@ function startWake() {
   wakeRec.lang = "en-US";
   wakeRec.interimResults = false;
   wakeRec.continuous = true;
-  wakeRec.onresult = ev => {
+  wakeRec.onresult = function (ev) {
     const said = ev.results[ev.results.length - 1][0].transcript || "";
     if (!/\b(hey\s+)?hope\b/i.test(said)) return;
+    setListening(true);
     const rest = stripWake(said);
     if (rest && typeof sendUserText === "function") sendUserText(rest);
     else startMic(true);
   };
-  wakeRec.onend = () => {
+  wakeRec.onend = function () {
     wakeRec = null;
     setTimeout(startWake, 400);
   };
   try { wakeRec.start(); } catch (e) {}
 }
+
 bindVoiceUi();
 document.addEventListener("click", function once() {
   startWake();
