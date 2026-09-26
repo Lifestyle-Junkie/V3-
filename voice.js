@@ -7,8 +7,9 @@ let listenHold = null;
 let sessionOn = false;
 let speaking = false;
 let ignoreUntil = 0;
+let listenGen = 0;
 
-const STOP_RE = /\b(stop talking|go away|stop listening|that's enough|thats enough|be quiet|never ?mind)\b/i;
+const STOP_RE = /\b(stop talking|go away|stop listening|that's enough|thats enough|be quiet|never ?mind|shut up)\b/i;
 
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -50,6 +51,7 @@ function stopSpeech() {
 
 function endSession() {
   sessionOn = false;
+  listenGen += 1;
   stopSpeech();
   stopMic();
   setListening(false);
@@ -61,14 +63,23 @@ function isStopCmd(text) {
 }
 
 function deafFor(ms) {
-  ignoreUntil = Date.now() + (ms || 900);
+  ignoreUntil = Date.now() + (ms || 700);
+}
+
+function killRec() {
+  const old = rec;
+  rec = null;
+  micOn = false;
+  if (!old) return;
+  try { old.onresult = null; old.onend = null; old.onerror = null; } catch (e) {}
+  try { old.abort(); } catch (e) {
+    try { old.stop(); } catch (e2) {}
+  }
 }
 
 async function speakHope(text) {
   if (!voiceOn || !text) return;
   try {
-    speaking = true;
-    stopMic(true);
     stopSpeech();
     speaking = true;
     let spoken = String(text);
@@ -98,26 +109,25 @@ async function speakHope(text) {
     hopeVoice.onended = function () {
       speaking = false;
       setOrbTalking(false);
-      deafFor(1200);
-      if (sessionOn) setTimeout(startSessionMic, 1200);
+      deafFor(700);
+      if (sessionOn) setTimeout(startSessionMic, 700);
     };
     hopeVoice.onerror = function () {
       speaking = false;
       setOrbTalking(false);
-      deafFor(800);
-      if (sessionOn) setTimeout(startSessionMic, 800);
+      if (sessionOn) setTimeout(startSessionMic, 400);
     };
+    if (sessionOn) startSessionMic();
     await hopeVoice.play();
   } catch (err) {
     speaking = false;
     setOrbTalking(false);
-    if (sessionOn) setTimeout(startSessionMic, 800);
+    if (sessionOn) startSessionMic();
   }
 }
 window.speakHope = speakHope;
 
 function handleHeard(raw) {
-  if (speaking || Date.now() < ignoreUntil) return;
   const said = (raw || "").trim();
   if (!said) {
     if (sessionOn) startSessionMic();
@@ -127,59 +137,70 @@ function handleHeard(raw) {
     endSession();
     return;
   }
+  if (speaking || Date.now() < ignoreUntil) {
+    if (sessionOn && !speaking) startSessionMic();
+    return;
+  }
   const cleaned = stripWake(said);
   if (!cleaned) {
     if (sessionOn) startSessionMic();
     return;
   }
   if (typeof input !== "undefined" && input) input.value = cleaned;
-  stopMic(true);
   if (typeof sendUserText === "function") sendUserText(cleaned);
 }
 
 function startSessionMic() {
   const Ctor = SpeechEngine();
-  if (!Ctor || !sessionOn || speaking) return;
-  if (Date.now() < ignoreUntil) {
-    setTimeout(startSessionMic, ignoreUntil - Date.now() + 50);
-    return;
-  }
-  stopMic(true);
+  if (!Ctor || !sessionOn) return;
+  const gen = ++listenGen;
+  killRec();
   rec = new Ctor();
   rec.lang = "en-US";
   rec.interimResults = true;
-  rec.continuous = true;
+  rec.continuous = false;
+  rec.maxAlternatives = 1;
   rec.onresult = function (ev) {
-    if (speaking || Date.now() < ignoreUntil) return;
+    if (gen !== listenGen) return;
     let said = "";
     let final = false;
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       said += ev.results[i][0].transcript;
       if (ev.results[i].isFinal) final = true;
     }
-    if (typeof input !== "undefined" && input) input.value = said;
     if (isStopCmd(said)) {
       endSession();
       return;
     }
+    if (speaking && !isStopCmd(said)) return;
+    if (typeof input !== "undefined" && input) input.value = said;
     if (final) handleHeard(said);
   };
   rec.onend = function () {
+    if (gen !== listenGen) return;
     micOn = false;
-    if (sessionOn && !speaking && Date.now() >= ignoreUntil) {
-      setTimeout(startSessionMic, 250);
-    }
+    if (sessionOn && !speaking) setTimeout(function () {
+      if (gen === listenGen && sessionOn && !micOn) startSessionMic();
+    }, 280);
   };
-  rec.onerror = function () {
+  rec.onerror = function (ev) {
+    if (gen !== listenGen) return;
     micOn = false;
-    if (sessionOn && !speaking) setTimeout(startSessionMic, 400);
+    if (!sessionOn) return;
+    const wait = (ev && ev.error === "no-speech") ? 200 : 450;
+    setTimeout(function () {
+      if (gen === listenGen && sessionOn && !micOn) startSessionMic();
+    }, wait);
   };
   try {
     rec.start();
     micOn = true;
     setListening(true);
   } catch (e) {
-    setTimeout(startSessionMic, 400);
+    micOn = false;
+    setTimeout(function () {
+      if (sessionOn && !micOn) startSessionMic();
+    }, 500);
   }
 }
 
@@ -187,8 +208,8 @@ function beginSession(firstCmd) {
   sessionOn = true;
   stopWake();
   setListening(true);
+  startSessionMic();
   if (firstCmd) handleHeard(firstCmd);
-  else startSessionMic();
 }
 
 function startMic() {
@@ -196,9 +217,7 @@ function startMic() {
 }
 
 function stopMic(keepLook) {
-  try { if (rec) rec.stop(); } catch (e) {}
-  rec = null;
-  micOn = false;
+  killRec();
   if (!keepLook) setListening(false);
 }
 
@@ -236,11 +255,10 @@ function startWake() {
   wakeRec.interimResults = false;
   wakeRec.continuous = true;
   wakeRec.onresult = function (ev) {
-    if (speaking || Date.now() < ignoreUntil) return;
+    if (speaking) return;
     const said = ev.results[ev.results.length - 1][0].transcript || "";
     if (!/\b(hey\s+)?hope\b/i.test(said)) return;
-    const rest = stripWake(said);
-    beginSession(rest);
+    beginSession(stripWake(said));
   };
   wakeRec.onend = function () {
     wakeRec = null;
