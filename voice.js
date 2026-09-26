@@ -4,6 +4,9 @@ let micOn = false;
 let rec = null;
 let wakeRec = null;
 let listenHold = null;
+let sessionOn = false;
+
+const STOP_RE = /\b(stop talking|go away|stop listening|that's enough|thats enough|be quiet|never ?mind)\b/i;
 
 function SpeechEngine() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
@@ -24,11 +27,6 @@ function setListening(on) {
     clearTimeout(listenHold);
     listenHold = null;
   }
-  if (on) {
-    listenHold = setTimeout(function () {
-      if (!micOn) setListening(false);
-    }, 12000);
-  }
 }
 
 function stripWake(text) {
@@ -37,13 +35,32 @@ function stripWake(text) {
     .trim();
 }
 
-async function speakHope(text) {
-  if (!voiceOn || !text) return;
+function stopSpeech() {
   try {
     if (hopeVoice) {
       hopeVoice.pause();
       hopeVoice.src = "";
     }
+  } catch (e) {}
+  setOrbTalking(false);
+}
+
+function endSession() {
+  sessionOn = false;
+  stopSpeech();
+  stopMic();
+  setListening(false);
+  startWake();
+}
+
+function isStopCmd(text) {
+  return STOP_RE.test(text || "");
+}
+
+async function speakHope(text) {
+  if (!voiceOn || !text) return;
+  try {
+    stopSpeech();
     let spoken = String(text);
     try {
       if (typeof parseSources === "function") spoken = parseSources(spoken).body || spoken;
@@ -51,7 +68,6 @@ async function speakHope(text) {
     } catch (e) {}
     spoken = String(spoken || text).replace(/\n*Sources:[\s\S]*/i, "").trim();
     if (!spoken) return;
-    setListening(false);
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -61,46 +77,92 @@ async function speakHope(text) {
     const blob = await res.blob();
     hopeVoice = new Audio(URL.createObjectURL(blob));
     setOrbTalking(true);
-    hopeVoice.onended = function () { setOrbTalking(false); };
-    hopeVoice.onerror = function () { setOrbTalking(false); };
+    hopeVoice.onended = function () {
+      setOrbTalking(false);
+      if (sessionOn) startSessionMic();
+    };
+    hopeVoice.onerror = function () {
+      setOrbTalking(false);
+      if (sessionOn) startSessionMic();
+    };
     await hopeVoice.play();
   } catch (err) {
     setOrbTalking(false);
+    if (sessionOn) startSessionMic();
   }
 }
 window.speakHope = speakHope;
 
-function startMic(commandMode) {
+function handleHeard(raw) {
+  const said = (raw || "").trim();
+  if (!said) {
+    if (sessionOn) startSessionMic();
+    return;
+  }
+  if (isStopCmd(said)) {
+    endSession();
+    return;
+  }
+  const cleaned = stripWake(said);
+  if (!cleaned) {
+    if (sessionOn) startSessionMic();
+    return;
+  }
+  if (typeof input !== "undefined" && input) input.value = cleaned;
+  if (typeof sendUserText === "function") sendUserText(cleaned);
+}
+
+function startSessionMic() {
   const Ctor = SpeechEngine();
-  if (!Ctor) return;
+  if (!Ctor || !sessionOn) return;
   stopMic(true);
   rec = new Ctor();
   rec.lang = "en-US";
   rec.interimResults = true;
-  rec.continuous = false;
+  rec.continuous = true;
   rec.onresult = function (ev) {
     let said = "";
+    let final = false;
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
       said += ev.results[i][0].transcript;
+      if (ev.results[i].isFinal) final = true;
     }
     if (typeof input !== "undefined" && input) input.value = said;
-    if (ev.results[ev.results.length - 1].isFinal) {
-      const cleaned = commandMode ? stripWake(said) : said.trim();
-      stopMic();
-      if (cleaned && typeof sendUserText === "function") sendUserText(cleaned);
+    if (isStopCmd(said)) {
+      endSession();
+      return;
     }
+    if (final) handleHeard(said);
   };
   rec.onend = function () {
     micOn = false;
-    if (!hopeVoice || hopeVoice.paused) setListening(false);
+    if (sessionOn && (!hopeVoice || hopeVoice.paused)) {
+      setTimeout(startSessionMic, 250);
+    }
   };
   rec.onerror = function () {
     micOn = false;
-    setListening(false);
+    if (sessionOn) setTimeout(startSessionMic, 400);
   };
-  rec.start();
-  micOn = true;
+  try {
+    rec.start();
+    micOn = true;
+    setListening(true);
+  } catch (e) {
+    setTimeout(startSessionMic, 400);
+  }
+}
+
+function beginSession(firstCmd) {
+  sessionOn = true;
+  stopWake();
   setListening(true);
+  if (firstCmd) handleHeard(firstCmd);
+  else startSessionMic();
+}
+
+function startMic(commandMode) {
+  beginSession("");
 }
 
 function stopMic(keepLook) {
@@ -110,6 +172,11 @@ function stopMic(keepLook) {
   if (!keepLook) setListening(false);
 }
 
+function stopWake() {
+  try { if (wakeRec) wakeRec.stop(); } catch (e) {}
+  wakeRec = null;
+}
+
 function bindVoiceUi() {
   const voiceToggle = document.querySelector(".toggle");
   if (voiceToggle) {
@@ -117,11 +184,7 @@ function bindVoiceUi() {
     voiceToggle.addEventListener("click", function () {
       voiceOn = !voiceOn;
       voiceToggle.classList.toggle("on", voiceOn);
-      if (!voiceOn) {
-        setOrbTalking(false);
-        setListening(false);
-        if (hopeVoice) hopeVoice.pause();
-      }
+      if (!voiceOn) endSession();
     });
   }
   const micBtn = document.getElementById("micBtn") || document.querySelector(".search .mic");
@@ -129,15 +192,15 @@ function bindVoiceUi() {
     micBtn.style.cursor = "pointer";
     micBtn.addEventListener("click", function (e) {
       e.preventDefault();
-      if (micOn) stopMic();
-      else startMic(false);
+      if (sessionOn || micOn) endSession();
+      else beginSession("");
     });
   }
 }
 
 function startWake() {
   const Ctor = SpeechEngine();
-  if (!Ctor || wakeRec) return;
+  if (!Ctor || wakeRec || sessionOn) return;
   wakeRec = new Ctor();
   wakeRec.lang = "en-US";
   wakeRec.interimResults = false;
@@ -145,14 +208,12 @@ function startWake() {
   wakeRec.onresult = function (ev) {
     const said = ev.results[ev.results.length - 1][0].transcript || "";
     if (!/\b(hey\s+)?hope\b/i.test(said)) return;
-    setListening(true);
     const rest = stripWake(said);
-    if (rest && typeof sendUserText === "function") sendUserText(rest);
-    else startMic(true);
+    beginSession(rest);
   };
   wakeRec.onend = function () {
     wakeRec = null;
-    setTimeout(startWake, 400);
+    if (!sessionOn) setTimeout(startWake, 400);
   };
   try { wakeRec.start(); } catch (e) {}
 }
