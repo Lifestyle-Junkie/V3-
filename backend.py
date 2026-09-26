@@ -54,26 +54,31 @@ SHEET_TABS = [
     "Holdings",
     "Investment Transactions",
 ]
+MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 BILLS_FILE = DIR / "hope-bills.json"
 HOLDINGS_FILE = DIR / "hope-holdings.json"
 CASH_FILE = DIR / "hope-cash.json"
 CHAT_FILE = DIR / "hope-chat.json"
+GOAL_FILE = DIR / "hope-goal.json"
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
 - The person talking to you is always Nick. Address him as sir in every reply.
 # Context
-- Today is Wednesday, September 23, 2026.
+- Today is Saturday, September 26, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time).
-- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill.
+- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal.
 - Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
 - update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
 - delete_monthly_bill: by id or exact name.
-- read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings. Use this whenever Nick asks about money on Capital.
+- read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings, AND the savings goal tracker (goal, monthly target, saved = RH+cash, percent, hit date, this month on-pace/behind). Use this whenever Nick asks about money, goal, or if he is behind.
+- set_savings_goal: set goal amount and/or monthly save and/or include_cash. Do not ask extra questions.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
+- Stock what-ifs ("if NVDA hits 55") stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
+When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables for Hope cards.
 Short, direct. Include sir once. Live facts from tools only.
 Always end live answers with:
 Sources:
@@ -114,8 +119,20 @@ TOOLS = [
     },
     {
         "name": "read_capital",
-        "description": "See Nick's Capital screen: cash on hand, Robinhood, net worth, monthly bills, and ticker holdings.",
+        "description": "See Nick's Capital screen: cash, Robinhood, net worth, bills, holdings, savings goal tracker.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "set_savings_goal",
+        "description": "Set savings goal and/or monthly save amount. Example: goal 30000 monthly 2200.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal": {"type": "number"},
+                "monthly": {"type": "number"},
+                "include_cash": {"type": "boolean"},
+            },
+        },
     },
     {
         "name": "add_monthly_bill",
@@ -323,6 +340,135 @@ def load_cash():
         return 2500.0
 def save_cash(n):
     CASH_FILE.write_text(json.dumps({"cash": float(n)}, indent=2), encoding="utf-8")
+def default_goal():
+    return {
+        "goal": 25000.0,
+        "monthly": 2200.0,
+        "includeCash": True,
+        "monthKey": "",
+        "monthStartPile": None,
+        "months": [
+            {"m": "Apr", "v": 2000, "ok": True},
+            {"m": "May", "v": 2200, "ok": True},
+            {"m": "Jun", "v": 1200, "ok": False},
+            {"m": "Jul", "v": 1800, "ok": True},
+            {"m": "Aug", "v": 1500, "ok": False},
+            {"m": "Sep", "v": 1500, "ok": False},
+        ],
+    }
+def load_goal():
+    base = default_goal()
+    if not GOAL_FILE.exists():
+        return base
+    try:
+        data = json.loads(GOAL_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return base
+        base.update(data)
+        return base
+    except Exception:
+        return base
+def save_goal(data):
+    if not isinstance(data, dict):
+        return
+    GOAL_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+def month_key_now():
+    now = datetime.now()
+    return "%04d-%02d" % (now.year, now.month)
+def pile_now(rh, cash, include_cash):
+    return (rh or 0) + (cash if include_cash else 0)
+def roll_goal(goal, saved):
+    key = month_key_now()
+    if not goal.get("monthKey"):
+        goal["monthKey"] = key
+        if goal.get("monthStartPile") is None:
+            goal["monthStartPile"] = saved
+        return goal
+    if goal.get("monthKey") == key:
+        if goal.get("monthStartPile") is None:
+            goal["monthStartPile"] = saved
+        return goal
+    try:
+        mm = int(str(goal.get("monthKey") or "1-1").split("-")[1])
+        old = MONTH_NAMES[max(0, mm - 1)]
+    except Exception:
+        old = "Prev"
+    added = saved - float(goal.get("monthStartPile") or saved)
+    monthly = float(goal.get("monthly") or 0)
+    months = list(goal.get("months") or [])
+    months.append({"m": old, "v": round(added), "ok": added >= monthly})
+    goal["months"] = months[-6:]
+    goal["monthKey"] = key
+    goal["monthStartPile"] = saved
+    return goal
+def goal_snapshot(rh=None, cash=None):
+    if cash is None:
+        cash = load_cash()
+    if rh is None:
+        rh = 0
+        acc, err = fetch_sheet_tab("Accounts")
+        if not err:
+            rh = robinhood_from_accounts(acc["rows"]) or 0
+    goal = load_goal()
+    include = bool(goal.get("includeCash", True))
+    saved = pile_now(rh, cash, include)
+    goal = roll_goal(goal, saved)
+    save_goal(goal)
+    target = float(goal.get("goal") or 0)
+    monthly = float(goal.get("monthly") or 0)
+    gap = max(0, target - saved)
+    pct = (saved / target * 100) if target else 0
+    if gap <= 0:
+        months_left, hit = 0, "Hit"
+    elif monthly > 0:
+        months_left = int(-(-gap // monthly))
+        now = datetime.now()
+        m = now.month - 1 + months_left
+        y = now.year + m // 12
+        mo = m % 12
+        hit = "%s %s" % (MONTH_NAMES[mo], y)
+    else:
+        months_left, hit = 0, "Set monthly"
+    start = goal.get("monthStartPile")
+    added = 0 if start is None else saved - float(start)
+    behind = max(0, monthly - added) if monthly else 0
+    pace = "On pace" if start is not None and added >= monthly else ("Behind" if start is not None else "—")
+    return {
+        "goal": target,
+        "monthly": monthly,
+        "includeCash": include,
+        "saved": saved,
+        "rh": rh,
+        "cash": cash,
+        "gap": gap,
+        "pct": round(pct, 1),
+        "monthsLeft": months_left,
+        "hitLabel": hit,
+        "month": MONTH_NAMES[datetime.now().month - 1],
+        "monthKey": goal.get("monthKey"),
+        "monthStartPile": start,
+        "addedThisMonth": added,
+        "behindBy": behind,
+        "pace": pace,
+        "months": goal.get("months") or [],
+    }
+def set_savings_goal(goal=None, monthly=None, include_cash=None):
+    data = load_goal()
+    if goal is not None:
+        try:
+            data["goal"] = abs(float(goal))
+        except Exception:
+            pass
+    if monthly is not None:
+        try:
+            data["monthly"] = abs(float(monthly))
+        except Exception:
+            pass
+    if include_cash is not None:
+        data["includeCash"] = bool(include_cash)
+    save_goal(data)
+    snap = goal_snapshot()
+    return json.dumps({"ok": True, "action": "updated", "goal": snap}, ensure_ascii=False)
 def load_chat():
     if not CHAT_FILE.exists():
         return {"topics": [], "currentId": 1, "nextId": 2}
@@ -355,6 +501,7 @@ def read_capital():
     if not err:
         rh = robinhood_from_accounts(acc["rows"])
     net = (rh or 0) + cash
+    snap = goal_snapshot(rh or 0, cash)
     return json.dumps({
         "screen": "Capital",
         "cash_on_hand": cash,
@@ -362,6 +509,7 @@ def read_capital():
         "net_worth": net,
         "monthly_bills": bills,
         "holdings": holds,
+        "savings_goal": snap,
     }, ensure_ascii=False)
 def new_bill_id():
     return "bill_%s_%04d" % (
@@ -384,7 +532,7 @@ def parse_amount(text):
     return parse_money(m.group(1))
 def parse_bill_name(text, amount=None):
     t = (text or "").strip()
-    t = re.sub(r"(?i)\b(add|update|monthly\s+bill|bill)\b", " ", t)
+    t = re.sub(r"(?is)\b(add|update|monthly\s+bill|bill)\b", " ", t)
     t = re.sub(r"(?i)\bdue(?:\s+on)?(?:\s+the)?\s+\d{1,2}(?:st|nd|rd|th)?\b", " ", t)
     t = re.sub(r"(?i)\b\d{1,2}(?:st|nd|rd|th)\b", " ", t)
     if amount is not None:
@@ -695,6 +843,8 @@ def run_tool(name, args):
         return read_sheet(args.get("tab", ""), args.get("query", ""), args.get("limit", 80))
     if name == "read_capital":
         return read_capital()
+    if name == "set_savings_goal":
+        return set_savings_goal(args.get("goal"), args.get("monthly"), args.get("include_cash"))
     if name == "add_monthly_bill":
         return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"), args.get("amount"))
     if name == "update_monthly_bill":
@@ -912,6 +1062,9 @@ class Handler(SimpleHTTPRequestHandler):
         if path == "/api/cash":
             self._json(200, {"cash": load_cash()})
             return
+        if path == "/api/goal":
+            self._json(200, goal_snapshot())
+            return
         if path == "/api/chat/history":
             self._json(200, load_chat())
             return
@@ -949,6 +1102,21 @@ class Handler(SimpleHTTPRequestHandler):
                 return
             save_cash(n)
             self._json(200, {"ok": True, "cash": n})
+            return
+        if self.path == "/api/goal":
+            try:
+                body = self._read_json_body()
+            except Exception:
+                self._json(400, {"error": "Bad JSON"})
+                return
+            cur = load_goal()
+            for k in ("goal", "monthly", "includeCash", "monthKey", "monthStartPile", "months"):
+                if k in body:
+                    cur[k] = body[k]
+            if "include_cash" in body:
+                cur["includeCash"] = bool(body.get("include_cash"))
+            save_goal(cur)
+            self._json(200, {"ok": True, "goal": goal_snapshot()})
             return
         if self.path == "/api/holdings":
             try:
