@@ -5,6 +5,8 @@ let rec = null;
 let wakeRec = null;
 let listenHold = null;
 let sessionOn = false;
+let speaking = false;
+let ignoreUntil = 0;
 
 const STOP_RE = /\b(stop talking|go away|stop listening|that's enough|thats enough|be quiet|never ?mind)\b/i;
 
@@ -36,6 +38,7 @@ function stripWake(text) {
 }
 
 function stopSpeech() {
+  speaking = false;
   try {
     if (hopeVoice) {
       hopeVoice.pause();
@@ -57,43 +60,64 @@ function isStopCmd(text) {
   return STOP_RE.test(text || "");
 }
 
+function deafFor(ms) {
+  ignoreUntil = Date.now() + (ms || 900);
+}
+
 async function speakHope(text) {
   if (!voiceOn || !text) return;
   try {
+    speaking = true;
+    stopMic(true);
     stopSpeech();
+    speaking = true;
     let spoken = String(text);
     try {
       if (typeof parseSources === "function") spoken = parseSources(spoken).body || spoken;
       if (typeof stripMd === "function") spoken = stripMd(spoken);
     } catch (e) {}
     spoken = String(spoken || text).replace(/\n*Sources:[\s\S]*/i, "").trim();
-    if (!spoken) return;
+    if (!spoken) {
+      speaking = false;
+      if (sessionOn) startSessionMic();
+      return;
+    }
     const res = await fetch("/api/speak", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text: spoken.slice(0, 1200) })
     });
-    if (!res.ok) return;
+    if (!res.ok) {
+      speaking = false;
+      if (sessionOn) startSessionMic();
+      return;
+    }
     const blob = await res.blob();
     hopeVoice = new Audio(URL.createObjectURL(blob));
     setOrbTalking(true);
     hopeVoice.onended = function () {
+      speaking = false;
       setOrbTalking(false);
-      if (sessionOn) startSessionMic();
+      deafFor(1200);
+      if (sessionOn) setTimeout(startSessionMic, 1200);
     };
     hopeVoice.onerror = function () {
+      speaking = false;
       setOrbTalking(false);
-      if (sessionOn) startSessionMic();
+      deafFor(800);
+      if (sessionOn) setTimeout(startSessionMic, 800);
     };
     await hopeVoice.play();
   } catch (err) {
+    speaking = false;
     setOrbTalking(false);
-    if (sessionOn) startSessionMic();
+    if (sessionOn) setTimeout(startSessionMic, 800);
   }
 }
 window.speakHope = speakHope;
 
 function handleHeard(raw) {
+  if (speaking || Date.now() < ignoreUntil) return;
   const said = (raw || "").trim();
   if (!said) {
     if (sessionOn) startSessionMic();
@@ -109,18 +133,24 @@ function handleHeard(raw) {
     return;
   }
   if (typeof input !== "undefined" && input) input.value = cleaned;
+  stopMic(true);
   if (typeof sendUserText === "function") sendUserText(cleaned);
 }
 
 function startSessionMic() {
   const Ctor = SpeechEngine();
-  if (!Ctor || !sessionOn) return;
+  if (!Ctor || !sessionOn || speaking) return;
+  if (Date.now() < ignoreUntil) {
+    setTimeout(startSessionMic, ignoreUntil - Date.now() + 50);
+    return;
+  }
   stopMic(true);
   rec = new Ctor();
   rec.lang = "en-US";
   rec.interimResults = true;
   rec.continuous = true;
   rec.onresult = function (ev) {
+    if (speaking || Date.now() < ignoreUntil) return;
     let said = "";
     let final = false;
     for (let i = ev.resultIndex; i < ev.results.length; i++) {
@@ -136,13 +166,13 @@ function startSessionMic() {
   };
   rec.onend = function () {
     micOn = false;
-    if (sessionOn && (!hopeVoice || hopeVoice.paused)) {
+    if (sessionOn && !speaking && Date.now() >= ignoreUntil) {
       setTimeout(startSessionMic, 250);
     }
   };
   rec.onerror = function () {
     micOn = false;
-    if (sessionOn) setTimeout(startSessionMic, 400);
+    if (sessionOn && !speaking) setTimeout(startSessionMic, 400);
   };
   try {
     rec.start();
@@ -161,7 +191,7 @@ function beginSession(firstCmd) {
   else startSessionMic();
 }
 
-function startMic(commandMode) {
+function startMic() {
   beginSession("");
 }
 
@@ -206,6 +236,7 @@ function startWake() {
   wakeRec.interimResults = false;
   wakeRec.continuous = true;
   wakeRec.onresult = function (ev) {
+    if (speaking || Date.now() < ignoreUntil) return;
     const said = ev.results[ev.results.length - 1][0].transcript || "";
     if (!/\b(hey\s+)?hope\b/i.test(said)) return;
     const rest = stripWake(said);
