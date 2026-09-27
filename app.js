@@ -56,6 +56,40 @@ function slimContent(content) {
   if (texts.length) return texts.map(function (b) { return b.text || ""; }).join("\n");
   return "[attachment]";
 }
+function contentForHope(m, keepMedia) {
+  const content = m && m.content;
+  if (!keepMedia) return slimContent(content);
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return slimContent(content);
+  const blocks = [];
+  content.forEach(function (b) {
+    if (!b) return;
+    if (b.type === "text" && String(b.text || "").trim()) {
+      blocks.push({ type: "text", text: b.text });
+    } else if (b.type === "image" && b.source && b.source.data) {
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: b.source.media_type || "image/jpeg",
+          data: b.source.data
+        }
+      });
+    } else if (b.type === "document" && b.source && b.source.data) {
+      blocks.push({
+        type: "document",
+        source: {
+          type: "base64",
+          media_type: b.source.media_type || "application/pdf",
+          data: b.source.data
+        }
+      });
+    }
+  });
+  if (!blocks.length) return slimContent(content);
+  if (blocks.length === 1 && blocks[0].type === "text") return blocks[0].text;
+  return blocks;
+}
 function slimTopics() {
   return topics.map(function (t) {
     return {
@@ -110,11 +144,17 @@ function messagesForHope() {
     const t = topics[i];
     const msgs = t.messages || [];
     if (!msgs.length) continue;
+    const isCurrent = t.id === currentId;
     out.push({ role: "user", content: "[Earlier topic: " + (t.title || "Untitled") + "]" });
     out.push({ role: "assistant", content: "Got it sir, I still have that topic." });
-    msgs.forEach(function (m) {
+    let lastUserIdx = -1;
+    msgs.forEach(function (m, idx) {
+      if (m.role === "user") lastUserIdx = idx;
+    });
+    msgs.forEach(function (m, idx) {
       if (m.role === "user" || m.role === "assistant") {
-        out.push({ role: m.role, content: slimContent(m.content) });
+        const keepMedia = isCurrent && m.role === "user" && idx === lastUserIdx;
+        out.push({ role: m.role, content: contentForHope(m, keepMedia) });
       }
     });
   }
@@ -433,8 +473,9 @@ function blocksFromPending(text) {
       } catch (e) {}
     }
   });
-  if (text) blocks.push({ type: "text", text: text });
-  else if (blocks.length) blocks.push({ type: "text", text: "Look at this." });
+  const asked = (text || "").trim();
+  if (asked) blocks.push({ type: "text", text: asked });
+  else if (blocks.length) blocks.push({ type: "text", text: "Look at the attached photo and help with what you see." });
   return blocks;
 }
 const attachBtn = document.getElementById("attachBtn");
