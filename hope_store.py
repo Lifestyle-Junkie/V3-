@@ -8,8 +8,8 @@ import urllib.error
 import urllib.request
 from datetime import datetime
 from pathlib import Path
-
 from hope_net import API_KEY, API_URL, MODEL, fetch_sheet_tab
+from hope_ingest import query_facts, ingest_zip_b64
 
 DIR = Path(__file__).resolve().parent
 MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
@@ -76,67 +76,21 @@ def line_month(line):
 def export_index(text=None):
     text = text if text is not None else load_export()
     if not text.strip():
-        return "No chat export saved. Attach the WhatsApp zip once."
+        return "No raw export text saved. Attach a zip once."
     lines = [ln for ln in text.splitlines() if ln.strip()]
     dates = WA_DATE.findall(text)
     first = last = ""
     if dates:
         first = "%s/%s/%s" % dates[0]
         last = "%s/%s/%s" % dates[-1]
-    return "Saved WhatsApp export: %d lines%s." % (
+    return "Saved export text: %d lines%s." % (
         len(lines),
         (" from %s to %s" % (first, last) if first else ""),
     )
 
 def search_export(query="", month="", limit=80):
-    text = load_export()
-    if not text.strip():
-        return "No chat export on file. Attach the WhatsApp zip again, then ask."
-    phrase = " ".join(x for x in ((query or ""), (month or "")) if x).strip()
-    mo = parse_month_arg(month) or parse_month_arg(phrase)
-    words = []
-    for w in re.findall(r"[a-z0-9$]+", (query or phrase).lower()):
-        if w in MONTH_ALIASES or w in ("in", "the", "for", "and", "sales", "sale", "what", "was", "making"):
-            continue
-        if w.isdigit() and 1 <= int(w) <= 12 and mo:
-            continue
-        words.append(w)
-    hits = []
-    total = 0.0
-    money_hits = 0
-    for ln in text.splitlines():
-        if not ln.strip():
-            continue
-        if mo and line_month(ln) != mo:
-            continue
-        blob = ln.lower()
-        if words and not all(w in blob for w in words):
-            continue
-        hits.append(ln.strip())
-        found = MONEY_RE.findall(ln) or MIR_NUM.findall(ln)
-        for amt in found:
-            n = parse_money(amt)
-            if n:
-                total += n
-                money_hits += 1
-    try:
-        limit = max(1, min(int(limit or 80), 150))
-    except Exception:
-        limit = 80
-    shown = hits[:limit]
-    month_label = MONTH_NAMES[mo - 1] if mo else "any month"
-    out = [
-        export_index(text),
-        "Filter: %s | month=%s | words=%s" % (phrase or "(all)", month_label, ", ".join(words) or "(none)"),
-        "Matches: %d (showing %d)" % (len(hits), len(shown)),
-        "Dollar amounts on matching lines: %d totaling $%s" % (
-            money_hits, "{:,.2f}".format(total) if money_hits else "0.00"),
-        "",
-    ]
-    out.extend(shown)
-    if len(hits) > limit:
-        out.append("... %d more. Narrow the month or store name." % (len(hits) - limit))
-    return "\n".join(out)
+    q = " ".join(x for x in ((query or ""), (month or "")) if x).strip()
+    return query_facts(q, limit)
 
 def parse_money(val):
     cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
