@@ -13,7 +13,7 @@ from hope_net import (
     SHEET_ID, SHEET_TABS, ELEVEN_KEY,
     fetch_sheet_tab, filter_sheet_rows, read_sheet,
     web_search, web_fetch, sc_search, yahoo_quote,
-    extract_zip_text, speak_text,
+    extract_zip_text, extract_zip_full, speak_text,
 )
 from hope_store import (
     parse_money, load_bills, load_holdings, save_holdings,
@@ -21,7 +21,7 @@ from hope_store import (
     load_chat, save_chat, read_capital, generate_insights,
     infer_bill, upsert_bill, refresh_bill_statuses,
     add_monthly_bill, update_monthly_bill, delete_monthly_bill,
-    robinhood_from_accounts,
+    robinhood_from_accounts, save_export, search_export, export_index,
 )
 
 HOST = "0.0.0.0"
@@ -52,7 +52,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Context
 - Today is Saturday, September 26, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time).
-- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal.
+- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal, search_export.
 - Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
 - update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
@@ -61,7 +61,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - set_savings_goal: set goal amount and/or monthly save and/or include_cash. Do not ask extra questions.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
-- If Nick attaches a zip, the extracted text files are already in the message. Read them. Do not ask him to paste the zip again.
+- If Nick attaches a WhatsApp zip, the full chat is saved server-side. Do NOT assume you already have every month in the current message. Always call search_export to find Miami/Pembroke/Jax sales, a month like March, or a dollar amount. Example: query="miami mir" month="march".
 - Stock what-ifs ("if NVDA hits 55") stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
 When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables for Hope cards.
@@ -80,6 +80,7 @@ TOOLS = [
     {"name": "add_monthly_bill", "description": "Add a bill from a phrase. No sheet.", "input_schema": {"type": "object", "properties": {"phrase": {"type": "string"}, "due_day": {"type": "integer"}, "name": {"type": "string"}, "amount": {"type": "number"}}, "required": ["phrase"]}},
     {"name": "update_monthly_bill", "description": "Update a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "due_day": {"type": "integer"}, "amount": {"type": "number"}, "type": {"type": "string"}, "status": {"type": "string"}}, "required": ["id"]}},
     {"name": "delete_monthly_bill", "description": "Delete a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
+    {"name": "search_export", "description": "Search the saved WhatsApp / zip export. Use for store sales by month, e.g. Miami in March.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
 ]
 
 def run_tool(name, args):
@@ -99,6 +100,8 @@ def run_tool(name, args):
         return update_monthly_bill(args.get("id", ""), args.get("name"), args.get("due_day"), args.get("amount"), args.get("type"), args.get("status"))
     if name == "delete_monthly_bill":
         return delete_monthly_bill(args.get("id", ""))
+    if name == "search_export":
+        return search_export(args.get("query", ""), args.get("month", ""), args.get("limit", 80))
     return "Unknown tool: %s" % name
 
 def claude(messages, system=SYSTEM):
@@ -139,7 +142,11 @@ def clean_block(b):
         media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
         if src.get("type") == "base64" and data:
             if "zip" in media.lower():
-                return {"type": "text", "text": extract_zip_text(data)}
+                full, names = extract_zip_full(data)
+                if not full:
+                    return {"type": "text", "text": str(names or "[zip] empty")}
+                save_export(full)
+                return {"type": "text", "text": export_index(full) + " Use search_export to look up Miami, March, sales, etc."}
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
     return None
 
