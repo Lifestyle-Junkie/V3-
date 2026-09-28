@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
+import base64
 import calendar
 import csv
 import html
@@ -12,6 +13,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import zipfile
 from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -78,6 +80,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - set_savings_goal: set goal amount and/or monthly save and/or include_cash. Do not ask extra questions.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
+- If Nick attaches a zip, the extracted text files are already in the message. Read them. Do not ask him to paste the zip again.
 - Stock what-ifs ("if NVDA hits 55") stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
 When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables for Hope cards.
@@ -950,6 +953,41 @@ def claude(messages, system=SYSTEM):
         return None, msg
     except Exception as e:
         return None, str(e)
+
+TEXT_ZIP_EXTS = (".txt", ".csv", ".json", ".md", ".log", ".html", ".htm", ".xml")
+def extract_zip_text(b64, per_file=80000, total=120000):
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return "[zip] bad base64"
+    out = []
+    used = 0
+    try:
+        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
+            names = zf.namelist()
+            out.append("Attached zip contents: " + ", ".join(names[:40]))
+            for name in names:
+                if used >= total:
+                    out.append("[truncated more files]")
+                    break
+                low = name.lower().replace("\\", "/")
+                if name.endswith("/") or "/__macosx" in low or low.startswith("__macosx"):
+                    continue
+                if not low.endswith(TEXT_ZIP_EXTS):
+                    out.append("[skipped binary] " + name)
+                    continue
+                blob = zf.read(name)
+                try:
+                    text = blob.decode("utf-8")
+                except Exception:
+                    text = blob.decode("latin-1", errors="replace")
+                if len(text) > per_file:
+                    text = text[-per_file:]
+                used += len(text)
+                out.append("## " + name + "\n" + text)
+    except Exception as e:
+        return "[zip] " + str(e)
+    return "\n\n".join(out)[:total]
 def extract_text(content):
     return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
 def clean_block(b):
@@ -970,6 +1008,8 @@ def clean_block(b):
         data = (src.get("data") or "").strip()
         media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
         if src.get("type") == "base64" and data:
+            if "zip" in media.lower():
+                return {"type": "text", "text": extract_zip_text(data)}
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
     return None
 def clean_messages(raw_msgs):
