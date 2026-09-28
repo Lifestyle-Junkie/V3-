@@ -94,9 +94,12 @@ def fetch_sheet_tab(tab):
     if not tab:
         return None, "Unknown tab. Allowed: " + ", ".join(SHEET_TABS)
     url = (
-        "https://docs.google.com/spreadsheets/d/" + SHEET_ID +
-        "/gviz/tq?tqx=out:csv&sheet=" + urllib.parse.quote(tab) +
-        "&_=" + str(int(time.time()))
+        "https://docs.google.com/spreadsheets/d/"
+        + SHEET_ID
+        + "/gviz/tq?tqx=out:csv&sheet="
+        + urllib.parse.quote(tab)
+        + "&_="
+        + str(int(time.time()))
     )
     try:
         _, text = http_get(url, timeout=20, headers={"Accept": "text/csv,*/*"})
@@ -111,12 +114,18 @@ def filter_sheet_rows(rows, query, limit):
     q = (query or "").strip().lower()
     out = rows
     if q:
-        out = [row for row in rows if q in " ".join(str(v) for v in row.values()).lower()]
+        filtered = []
+        for row in rows:
+            blob = " ".join(str(v) for v in row.values()).lower()
+            if q in blob:
+                filtered.append(row)
+        out = filtered
     try:
         limit = int(limit)
     except Exception:
         limit = 80
-    return out[:max(1, min(limit, 250))]
+    limit = max(1, min(limit, 250))
+    return out[:limit]
 
 def read_sheet(tab, query="", limit=80):
     data, err = fetch_sheet_tab(tab)
@@ -124,9 +133,12 @@ def read_sheet(tab, query="", limit=80):
         return err
     rows = filter_sheet_rows(data["rows"], query, limit)
     return json.dumps({
-        "tab": data["tab"], "headers": data["headers"],
-        "count_total": data["count"], "count_returned": len(rows),
-        "query": query or "", "rows": rows,
+        "tab": data["tab"],
+        "headers": data["headers"],
+        "count_total": data["count"],
+        "count_returned": len(rows),
+        "query": query or "",
+        "rows": rows,
     }, ensure_ascii=False)
 
 def web_search(query):
@@ -136,7 +148,8 @@ def web_search(query):
     body = urllib.parse.urlencode({"q": q}).encode("utf-8")
     try:
         _, page = http_get(
-            "https://html.duckduckgo.com/html/", data=body,
+            "https://html.duckduckgo.com/html/",
+            data=body,
             headers={"Content-Type": "application/x-www-form-urlencoded"},
         )
     except Exception as e:
@@ -172,8 +185,9 @@ def web_fetch(url, prompt=""):
         final, page = http_get(url, timeout=25)
     except Exception as e:
         return "Fetch failed for %s: %s" % (url, e)
+    text = strip_tags(page)[:12000]
     note = "Focus: %s\n" % prompt if prompt else ""
-    return "%sURL: %s\n\n%s" % (note, final, strip_tags(page)[:12000] or "(no text)")
+    return "%sURL: %s\n\n%s" % (note, final, text or "(no text)")
 
 def sc_client_id():
     if _SC_CLIENT["id"] and time.time() - _SC_CLIENT["t"] < 3600:
@@ -270,38 +284,43 @@ def yahoo_quote(symbol):
         print("[quote] failed for %s: %s" % (symbol, e))
         return None
 
-def extract_zip_text(b64, per_file=80000, total=120000):
+def decode_zip_bytes(blob):
+    for enc in ("utf-8", "utf-8-sig", "utf-16", "latin-1"):
+        try:
+            return blob.decode(enc)
+        except Exception:
+            continue
+    return blob.decode("utf-8", errors="replace")
+
+def extract_zip_full(b64):
     try:
         raw = base64.b64decode(b64)
     except Exception:
-        return "[zip] bad base64"
-    out, used = [], 0
+        return None, "[zip] bad base64"
+    parts = []
+    names = []
     try:
         with zipfile.ZipFile(io.BytesIO(raw)) as zf:
             names = zf.namelist()
-            out.append("Attached zip contents: " + ", ".join(names[:40]))
             for name in names:
-                if used >= total:
-                    out.append("[truncated more files]")
-                    break
                 low = name.lower().replace("\\", "/")
                 if name.endswith("/") or "/__macosx" in low or low.startswith("__macosx"):
                     continue
                 if not low.endswith(TEXT_ZIP_EXTS):
-                    out.append("[skipped binary] " + name)
                     continue
-                blob = zf.read(name)
-                try:
-                    text = blob.decode("utf-8")
-                except Exception:
-                    text = blob.decode("latin-1", errors="replace")
-                if len(text) > per_file:
-                    text = text[-per_file:]
-                used += len(text)
-                out.append("## " + name + "\n" + text)
+                parts.append("## " + name + "\n" + decode_zip_bytes(zf.read(name)))
     except Exception as e:
-        return "[zip] " + str(e)
-    return "\n\n".join(out)[:total]
+        return None, "[zip] " + str(e)
+    return "\n\n".join(parts), names
+
+def extract_zip_text(b64, per_file=80000, total=120000):
+    full, names = extract_zip_full(b64)
+    if full is None:
+        return names
+    if isinstance(names, str):
+        return names
+    head = "Attached zip contents: " + ", ".join(names[:40])
+    return (head + "\n\n" + full)[:total]
 
 def speak_text(text):
     if not ELEVEN_KEY:
