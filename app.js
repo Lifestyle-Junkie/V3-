@@ -48,6 +48,11 @@ const widgetSource = {
   weather: ".card.weather",
   music: ".card.music"
 };
+function isZipFile(file, media) {
+  const name = ((file && file.name) || "").toLowerCase();
+  const type = String(media || (file && file.type) || "").toLowerCase();
+  return name.endsWith(".zip") || type.indexOf("zip") !== -1;
+}
 function slimContent(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return content == null ? "" : String(content);
@@ -304,6 +309,9 @@ function renderUserContent(content) {
     content.forEach(function (b) {
       if (b && b.type === "image" && b.source && b.source.data) {
         showUserShot("data:" + (b.source.media_type || "image/jpeg") + ";base64," + b.source.data);
+      } else if (b && b.type === "document") {
+        const media = ((b.source && b.source.media_type) || "").toLowerCase();
+        addLine("You", media.indexOf("zip") !== -1 ? "[zip attached]" : "[file attached]", "me");
       }
     });
     const t = textFromContent(content);
@@ -448,25 +456,41 @@ function renderAttachRow() {
 async function addFiles(list) {
   for (let i = 0; i < list.length; i++) {
     const file = list[i];
-    if (!file || file.size > 8 * 1024 * 1024) continue;
-    const dataUrl = await shrinkImage(file);
+    if (!file) continue;
+    const zip = isZipFile(file);
+    if (file.size > (zip ? 12 : 8) * 1024 * 1024) continue;
+    const dataUrl = zip ? await fileToDataUrl(file) : await shrinkImage(file);
     if (!dataUrl || typeof dataUrl !== "string") continue;
     const parts = dataUrl.split(",");
     const meta = parts[0] || "";
     const data = parts[1] || "";
     const media = ((meta.match(/data:([^;]+)/) || [])[1] || file.type || "application/octet-stream");
-    const kind = media.startsWith("image/") ? "image" : (media === "application/pdf" ? "document" : "text");
-    pendingFiles.push({ name: file.name || "paste", media: media, data: data, kind: kind });
+    const kind = media.startsWith("image/") ? "image"
+      : (media === "application/pdf" ? "document"
+      : (zip || isZipFile(file, media) ? "zip" : "text"));
+    pendingFiles.push({
+      name: file.name || (kind === "zip" ? "archive.zip" : "paste"),
+      media: kind === "zip" ? "application/zip" : media,
+      data: data,
+      kind: kind
+    });
   }
   renderAttachRow();
 }
 function blocksFromPending(text) {
   const blocks = [];
+  let hasZip = false;
   pendingFiles.forEach(function (f) {
     if (f.kind === "image") {
       blocks.push({ type: "image", source: { type: "base64", media_type: f.media || "image/jpeg", data: f.data } });
+    } else if (f.kind === "zip") {
+      hasZip = true;
+      blocks.push({
+        type: "document",
+        source: { type: "base64", media_type: "application/zip", data: f.data }
+      });
     } else if (f.kind === "document") {
-      blocks.push({ type: "document", source: { type: "base64", media_type: "application/pdf", data: f.data } });
+      blocks.push({ type: "document", source: { type: "base64", media_type: f.media || "application/pdf", data: f.data } });
     } else {
       try {
         blocks.push({ type: "text", text: "File " + f.name + ":\n" + atob(f.data).slice(0, 12000) });
@@ -475,6 +499,7 @@ function blocksFromPending(text) {
   });
   const asked = (text || "").trim();
   if (asked) blocks.push({ type: "text", text: asked });
+  else if (hasZip) blocks.push({ type: "text", text: "Read the attached zip and help with what is inside." });
   else if (blocks.length) blocks.push({ type: "text", text: "Look at the attached photo and help with what you see." });
   return blocks;
 }
@@ -488,20 +513,22 @@ if (attachBtn && filePick) {
   });
 }
 document.addEventListener("paste", async function (e) {
-  const items = e.clipboardData && e.clipboardData.items;
-  if (!items) return;
-  const files = [];
-  for (let i = 0; i < items.length; i++) {
-    const it = items[i];
-    if (it.type && it.type.startsWith("image/")) {
-      const f = it.getAsFile();
-      if (f) files.push(f);
+  const bag = [];
+  const cd = e.clipboardData;
+  if (cd && cd.files && cd.files.length) {
+    for (let i = 0; i < cd.files.length; i++) bag.push(cd.files[i]);
+  } else if (cd && cd.items) {
+    for (let i = 0; i < cd.items.length; i++) {
+      const it = cd.items[i];
+      if (it.kind === "file") {
+        const f = it.getAsFile();
+        if (f) bag.push(f);
+      }
     }
   }
-  if (files.length) {
-    e.preventDefault();
-    await addFiles(files);
-  }
+  if (!bag.length) return;
+  e.preventDefault();
+  await addFiles(bag);
 });
 const dropTarget = document.querySelector(".search");
 if (dropTarget) {
@@ -615,12 +642,13 @@ async function sendUserText(text) {
   busy = true;
   const topic = currentTopic();
   const hasFiles = pendingFiles.length > 0;
+  const hasZip = pendingFiles.some(function (f) { return f.kind === "zip"; });
   const payload = hasFiles ? blocksFromPending(text) : text;
   renderUserContent(payload);
   topic.messages.push({ role: "user", content: payload });
   pendingFiles = [];
   renderAttachRow();
-  if (topic.title === "New topic") topic.title = shortTitle(text || "Photo");
+  if (topic.title === "New topic") topic.title = shortTitle(text || (hasZip ? "Zip" : "Photo"));
   renderTopics();
   saveChatHistory();
   if (input) input.value = "";
@@ -690,7 +718,7 @@ async function sendUserText(text) {
     if (input) input.focus();
     return;
   }
-  const waiting = addLine("Hope", "Searching…", "bot");
+  const waiting = addLine("Hope", hasZip ? "Opening zip…" : "Searching…", "bot");
   startThink(waiting);
   try {
     const res = await fetch("/api/chat", {
