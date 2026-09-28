@@ -8,7 +8,6 @@ import urllib.parse
 import urllib.request
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-
 from hope_net import (
     SHEET_ID, SHEET_TABS, ELEVEN_KEY,
     fetch_sheet_tab, filter_sheet_rows, read_sheet,
@@ -22,8 +21,8 @@ from hope_store import (
     infer_bill, upsert_bill, refresh_bill_statuses,
     add_monthly_bill, update_monthly_bill, delete_monthly_bill,
     robinhood_from_accounts, save_export, search_export, export_index,
+    ingest_zip_b64,
 )
-
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
@@ -61,7 +60,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - set_savings_goal: set goal amount and/or monthly save and/or include_cash. Do not ask extra questions.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
-- If Nick attaches a WhatsApp zip, the full chat is saved server-side. Do NOT assume you already have every month in the current message. Always call search_export to find Miami/Pembroke/Jax sales, a month like March, or a dollar amount. Example: query="miami mir" month="march".
+- If Nick attaches a zip, ingest it and call search_export with his question. Do not assume folder layout, company names, or keywords. Never treat a missing value as zero.
 - Stock what-ifs ("if NVDA hits 55") stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
 When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables for Hope cards.
@@ -80,9 +79,8 @@ TOOLS = [
     {"name": "add_monthly_bill", "description": "Add a bill from a phrase. No sheet.", "input_schema": {"type": "object", "properties": {"phrase": {"type": "string"}, "due_day": {"type": "integer"}, "name": {"type": "string"}, "amount": {"type": "number"}}, "required": ["phrase"]}},
     {"name": "update_monthly_bill", "description": "Update a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "due_day": {"type": "integer"}, "amount": {"type": "number"}, "type": {"type": "string"}, "status": {"type": "string"}}, "required": ["id"]}},
     {"name": "delete_monthly_bill", "description": "Delete a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
-    {"name": "search_export", "description": "Search the saved WhatsApp / zip export. Use for store sales by month, e.g. Miami in March.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
+    {"name": "search_export", "description": "Query facts extracted from an uploaded zip/archive. Pass the user's question. Do not assume a vendor or keyword list.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
 ]
-
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
@@ -103,7 +101,6 @@ def run_tool(name, args):
     if name == "search_export":
         return search_export(args.get("query", ""), args.get("month", ""), args.get("limit", 80))
     return "Unknown tool: %s" % name
-
 def claude(messages, system=SYSTEM):
     payload = json.dumps({"model": MODEL, "max_tokens": 4096, "system": system, "messages": messages, "tools": TOOLS}).encode("utf-8")
     req = urllib.request.Request(API_URL, data=payload, headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}, method="POST")
@@ -119,10 +116,8 @@ def claude(messages, system=SYSTEM):
         return None, msg
     except Exception as e:
         return None, str(e)
-
 def extract_text(content):
     return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
-
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -142,14 +137,15 @@ def clean_block(b):
         media = (src.get("media_type") or "application/pdf").split(";")[0].strip()
         if src.get("type") == "base64" and data:
             if "zip" in media.lower():
+                info = ingest_zip_b64(data, "upload.zip")
                 full, names = extract_zip_full(data)
-                if not full:
-                    return {"type": "text", "text": str(names or "[zip] empty")}
-                save_export(full)
-                return {"type": "text", "text": export_index(full) + " Use search_export to look up Miami, March, sales, etc."}
+                if full:
+                    save_export(full)
+                if not info.get("ok"):
+                    return {"type": "text", "text": str(info.get("error") or names or "[zip] failed")}
+                return {"type": "text", "text": json.dumps(info, ensure_ascii=False) + " Ask questions; use search_export."}
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
     return None
-
 def clean_messages(raw_msgs):
     clean = []
     for m in raw_msgs:
@@ -165,7 +161,6 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
-
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -186,7 +181,6 @@ def chat_with_tools(user_messages, extra=""):
             results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
-
 def short_spoken(text):
     t = re.sub(r"(?is)\n*Sources:.*", "", text or "").strip()
     t = re.sub(r"[*_`#]+", "", t)
@@ -197,7 +191,6 @@ def short_spoken(text):
     if len(recap) > 280:
         recap = recap[:277].rsplit(" ", 1)[0].rstrip(".,;:") + "."
     return recap or t[:200]
-
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -467,7 +460,6 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(audio)
-
 if __name__ == "__main__":
     for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
         if not (DIR / name).exists():
