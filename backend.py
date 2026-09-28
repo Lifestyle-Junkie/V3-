@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
-import base64
-import calendar
-import csv
-import html
-import io
 import json
 import os
 import re
-import ssl
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
-import zipfile
-from datetime import datetime
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+
+from hope_net import (
+    SHEET_ID, SHEET_TABS, ELEVEN_KEY,
+    fetch_sheet_tab, filter_sheet_rows, read_sheet,
+    web_search, web_fetch, sc_search, yahoo_quote,
+    extract_zip_text, speak_text,
+)
+from hope_store import (
+    parse_money, load_bills, load_holdings, save_holdings,
+    load_cash, save_cash, load_goal, save_goal, goal_snapshot, set_savings_goal,
+    load_chat, save_chat, read_capital, generate_insights,
+    infer_bill, upsert_bill, refresh_bill_statuses,
+    add_monthly_bill, update_monthly_bill, delete_monthly_bill,
+    robinhood_from_accounts,
+)
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
@@ -35,35 +42,9 @@ STATIC = {
 }
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
-ELEVEN_KEY = os.environ.get("ELEVENLABS_API_KEY", "").strip()
-ELEVEN_VOICE = os.environ.get("ELEVENLABS_VOICE_ID", "DAQ2lZdypaQsApLOpVPq").strip()
 MODEL = "claude-sonnet-5"
 API_URL = "https://api.anthropic.com/v1/messages"
 MAX_TOOL_ROUNDS = 8
-CTX = ssl.create_default_context()
-_SC_CLIENT = {"id": "", "t": 0}
-SHEET_ID = os.environ.get(
-    "HOPE_SHEET_ID",
-    "1eVbAcpz_rGbZ0hXdA3Bleibzj_RfvFB3zkyhT6bgOpk",
-).strip()
-SHEET_TABS = [
-    "Bank Connections",
-    "Accounts",
-    "Balance History",
-    "Categories",
-    "Transactions",
-    "Securities",
-    "Holdings",
-    "Investment Transactions",
-]
-MONTH_NAMES = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-BILLS_FILE = DIR / "hope-bills.json"
-HOLDINGS_FILE = DIR / "hope-holdings.json"
-CASH_FILE = DIR / "hope-cash.json"
-CHAT_FILE = DIR / "hope-chat.json"
-GOAL_FILE = DIR / "hope-goal.json"
-INSIGHTS_FILE = DIR / "hope-insights.json"
-INSIGHT_TTL = 3600
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
@@ -91,818 +72,16 @@ Sources:
 Spoken replies: short, no markdown sources.
 """
 TOOLS = [
-    {
-        "name": "web_search",
-        "description": "Live web search.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"query": {"type": "string"}},
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "web_fetch",
-        "description": "Fetch a public http(s) URL.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"url": {"type": "string"}, "prompt": {"type": "string"}},
-            "required": ["url"],
-        },
-    },
-    {
-        "name": "read_sheet",
-        "description": "Read a finance sheet tab. Never use this for monthly bills or the Capital holdings list.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "tab": {"type": "string"},
-                "limit": {"type": "integer"},
-                "query": {"type": "string"},
-            },
-            "required": ["tab"],
-        },
-    },
-    {
-        "name": "read_capital",
-        "description": "See Nick's Capital screen: cash, Robinhood, net worth, bills, holdings, savings goal tracker.",
-        "input_schema": {"type": "object", "properties": {}, "required": []},
-    },
-    {
-        "name": "set_savings_goal",
-        "description": "Set savings goal and/or monthly save amount. Example: goal 30000 monthly 2200.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "goal": {"type": "number"},
-                "monthly": {"type": "number"},
-                "include_cash": {"type": "boolean"},
-            },
-        },
-    },
-    {
-        "name": "add_monthly_bill",
-        "description": "Add a bill from a phrase. No sheet. Example: rent 1450 due the 1st.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "phrase": {"type": "string"},
-                "due_day": {"type": "integer"},
-                "name": {"type": "string"},
-                "amount": {"type": "number"},
-            },
-            "required": ["phrase"],
-        },
-    },
-    {
-        "name": "update_monthly_bill",
-        "description": "Update a bill by id or exact name.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "id": {"type": "string"},
-                "name": {"type": "string"},
-                "due_day": {"type": "integer"},
-                "amount": {"type": "number"},
-                "type": {"type": "string"},
-                "status": {"type": "string"},
-            },
-            "required": ["id"],
-        },
-    },
-    {
-        "name": "delete_monthly_bill",
-        "description": "Delete a bill by id or exact name.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"id": {"type": "string"}},
-            "required": ["id"],
-        },
-    },
+    {"name": "web_search", "description": "Live web search.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
+    {"name": "web_fetch", "description": "Fetch a public http(s) URL.", "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "prompt": {"type": "string"}}, "required": ["url"]}},
+    {"name": "read_sheet", "description": "Read a finance sheet tab. Never use this for monthly bills or the Capital holdings list.", "input_schema": {"type": "object", "properties": {"tab": {"type": "string"}, "limit": {"type": "integer"}, "query": {"type": "string"}}, "required": ["tab"]}},
+    {"name": "read_capital", "description": "See Nick's Capital screen: cash, Robinhood, net worth, bills, holdings, savings goal tracker.", "input_schema": {"type": "object", "properties": {}, "required": []}},
+    {"name": "set_savings_goal", "description": "Set savings goal and/or monthly save amount.", "input_schema": {"type": "object", "properties": {"goal": {"type": "number"}, "monthly": {"type": "number"}, "include_cash": {"type": "boolean"}}}},
+    {"name": "add_monthly_bill", "description": "Add a bill from a phrase. No sheet.", "input_schema": {"type": "object", "properties": {"phrase": {"type": "string"}, "due_day": {"type": "integer"}, "name": {"type": "string"}, "amount": {"type": "number"}}, "required": ["phrase"]}},
+    {"name": "update_monthly_bill", "description": "Update a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "due_day": {"type": "integer"}, "amount": {"type": "number"}, "type": {"type": "string"}, "status": {"type": "string"}}, "required": ["id"]}},
+    {"name": "delete_monthly_bill", "description": "Delete a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
 ]
-def http_get(url, timeout=20, data=None, headers=None):
-    h = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) HopeV3/1.0",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    if headers:
-        h.update(headers)
-    req = urllib.request.Request(url, data=data, headers=h)
-    with urllib.request.urlopen(req, timeout=timeout, context=CTX) as resp:
-        raw = resp.read()
-        ctype = resp.headers.get("Content-Type", "")
-        final = resp.geturl()
-    enc = "utf-8"
-    m = re.search(r"charset=([\w-]+)", ctype, re.I)
-    if m:
-        enc = m.group(1)
-    try:
-        text = raw.decode(enc, errors="replace")
-    except LookupError:
-        text = raw.decode("utf-8", errors="replace")
-    return final, text
-def strip_tags(text):
-    text = re.sub(r"(?is)<script[^>]*>.*?</script>", " ", text)
-    text = re.sub(r"(?is)<style[^>]*>.*?</style>", " ", text)
-    text = re.sub(r"(?is)<noscript[^>]*>.*?</noscript>", " ", text)
-    text = re.sub(r"(?is)<!--.*?-->", " ", text)
-    text = re.sub(r"(?is)<[^>]+>", " ", text)
-    text = html.unescape(text)
-    text = re.sub(r"[ \t]+", " ", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
-def parse_csv_text(csv_text):
-    rows = []
-    reader = csv.reader(io.StringIO(csv_text))
-    for row in reader:
-        rows.append([c.strip() for c in row])
-    if not rows:
-        return [], []
-    headers = rows[0]
-    out = []
-    for raw in rows[1:]:
-        if not any(raw):
-            continue
-        item = {}
-        for i, h in enumerate(headers):
-            key = h or ("col_%d" % i)
-            item[key] = raw[i] if i < len(raw) else ""
-        out.append(item)
-    return headers, out
-def resolve_tab(name):
-    raw = (name or "").strip()
-    if not raw:
-        return None
-    for tab in SHEET_TABS:
-        if tab.lower() == raw.lower():
-            return tab
-    return None
-def fetch_sheet_tab(tab):
-    tab = resolve_tab(tab)
-    if not tab:
-        return None, "Unknown tab. Allowed: " + ", ".join(SHEET_TABS)
-    url = (
-        "https://docs.google.com/spreadsheets/d/"
-        + SHEET_ID
-        + "/gviz/tq?tqx=out:csv&sheet="
-        + urllib.parse.quote(tab)
-        + "&_="
-        + str(int(time.time()))
-    )
-    try:
-        _, text = http_get(url, timeout=20, headers={"Accept": "text/csv,*/*"})
-    except Exception as e:
-        return None, "Sheet fetch failed: %s" % e
-    if text.lstrip().startswith("<"):
-        return None, "Sheet not shared as Anyone with the link (Viewer)."
-    headers, rows = parse_csv_text(text)
-    return {"tab": tab, "headers": headers, "rows": rows, "count": len(rows)}, None
-def filter_sheet_rows(rows, query, limit):
-    q = (query or "").strip().lower()
-    out = rows
-    if q:
-        filtered = []
-        for row in rows:
-            blob = " ".join(str(v) for v in row.values()).lower()
-            if q in blob:
-                filtered.append(row)
-        out = filtered
-    try:
-        limit = int(limit)
-    except Exception:
-        limit = 80
-    limit = max(1, min(limit, 250))
-    return out[:limit]
-def read_sheet(tab, query="", limit=80):
-    data, err = fetch_sheet_tab(tab)
-    if err:
-        return err
-    rows = filter_sheet_rows(data["rows"], query, limit)
-    return json.dumps({
-        "tab": data["tab"],
-        "headers": data["headers"],
-        "count_total": data["count"],
-        "count_returned": len(rows),
-        "query": query or "",
-        "rows": rows,
-    }, ensure_ascii=False)
-def parse_money(val):
-    cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
-    try:
-        return float(cleaned) if cleaned else None
-    except Exception:
-        return None
-def clamp_due(year, month, due_day):
-    last = calendar.monthrange(year, month)[1]
-    return datetime(year, month, min(max(1, int(due_day or 1)), last))
-def cycle_window(due_day, today=None):
-    today = today or datetime.now()
-    due_day = max(1, min(31, int(due_day or 1)))
-    this_due = clamp_due(today.year, today.month, due_day)
-    if today >= this_due:
-        start = this_due
-        if today.month == 12:
-            end = clamp_due(today.year + 1, 1, due_day)
-        else:
-            end = clamp_due(today.year, today.month + 1, due_day)
-    else:
-        if today.month == 1:
-            start = clamp_due(today.year - 1, 12, due_day)
-        else:
-            start = clamp_due(today.year, today.month - 1, due_day)
-        end = this_due
-    return start, end
-def load_bills():
-    if not BILLS_FILE.exists():
-        return []
-    try:
-        data = json.loads(BILLS_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-def save_bills(bills):
-    if not isinstance(bills, list):
-        return
-    BILLS_FILE.write_text(json.dumps(bills, indent=2), encoding="utf-8")
-def load_holdings():
-    if not HOLDINGS_FILE.exists():
-        return []
-    try:
-        data = json.loads(HOLDINGS_FILE.read_text(encoding="utf-8"))
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-def save_holdings(rows):
-    HOLDINGS_FILE.write_text(json.dumps(rows, indent=2), encoding="utf-8")
-def load_cash():
-    if not CASH_FILE.exists():
-        return 2500.0
-    try:
-        data = json.loads(CASH_FILE.read_text(encoding="utf-8"))
-        n = float(data.get("cash") if isinstance(data, dict) else data)
-        return n if n == n else 2500.0
-    except Exception:
-        return 2500.0
-def save_cash(n):
-    CASH_FILE.write_text(json.dumps({"cash": float(n)}, indent=2), encoding="utf-8")
-def default_goal():
-    return {
-        "goal": 25000.0,
-        "monthly": 2200.0,
-        "includeCash": True,
-        "monthKey": "",
-        "monthStartPile": None,
-        "months": [],
-    }
-def load_goal():
-    base = default_goal()
-    if not GOAL_FILE.exists():
-        return base
-    try:
-        data = json.loads(GOAL_FILE.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return base
-        base.update(data)
-        return base
-    except Exception:
-        return base
-def save_goal(data):
-    if not isinstance(data, dict):
-        return
-    GOAL_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
-def month_key_now():
-    now = datetime.now()
-    return "%04d-%02d" % (now.year, now.month)
-def pile_now(rh, cash, include_cash):
-    return (rh or 0) + (cash if include_cash else 0)
-def roll_goal(goal, saved):
-    key = month_key_now()
-    if not goal.get("monthKey"):
-        goal["monthKey"] = key
-        if goal.get("monthStartPile") is None:
-            goal["monthStartPile"] = saved
-        return goal
-    if goal.get("monthKey") == key:
-        if goal.get("monthStartPile") is None:
-            goal["monthStartPile"] = saved
-        return goal
-    try:
-        mm = int(str(goal.get("monthKey") or "1-1").split("-")[1])
-        old = MONTH_NAMES[max(0, mm - 1)]
-    except Exception:
-        old = "Prev"
-    added = saved - float(goal.get("monthStartPile") or saved)
-    monthly = float(goal.get("monthly") or 0)
-    months = list(goal.get("months") or [])
-    months.append({"m": old, "v": round(added), "ok": added >= monthly})
-    goal["months"] = months[-6:]
-    goal["monthKey"] = key
-    goal["monthStartPile"] = saved
-    return goal
-def goal_snapshot(rh=None, cash=None):
-    if cash is None:
-        cash = load_cash()
-    if rh is None:
-        rh = 0
-        acc, err = fetch_sheet_tab("Accounts")
-        if not err:
-            rh = robinhood_from_accounts(acc["rows"]) or 0
-    goal = load_goal()
-    include = bool(goal.get("includeCash", True))
-    saved = pile_now(rh, cash, include)
-    goal = roll_goal(goal, saved)
-    save_goal(goal)
-    target = float(goal.get("goal") or 0)
-    monthly = float(goal.get("monthly") or 0)
-    gap = max(0, target - saved)
-    pct = (saved / target * 100) if target else 0
-    if gap <= 0:
-        months_left, hit = 0, "Hit"
-    elif monthly > 0:
-        months_left = int(-(-gap // monthly))
-        now = datetime.now()
-        m = now.month - 1 + months_left
-        y = now.year + m // 12
-        mo = m % 12
-        hit = "%s %s" % (MONTH_NAMES[mo], y)
-    else:
-        months_left, hit = 0, "Set monthly"
-    start = goal.get("monthStartPile")
-    added = 0 if start is None else saved - float(start)
-    behind = max(0, monthly - added) if monthly else 0
-    pace = "On pace" if start is not None and added >= monthly else ("Behind" if start is not None else "—")
-    return {
-        "goal": target,
-        "monthly": monthly,
-        "includeCash": include,
-        "saved": saved,
-        "rh": rh,
-        "cash": cash,
-        "gap": gap,
-        "pct": round(pct, 1),
-        "monthsLeft": months_left,
-        "hitLabel": hit,
-        "month": MONTH_NAMES[datetime.now().month - 1],
-        "monthKey": goal.get("monthKey"),
-        "monthStartPile": start,
-        "addedThisMonth": added,
-        "behindBy": behind,
-        "pace": pace,
-        "months": goal.get("months") or [],
-    }
-def set_savings_goal(goal=None, monthly=None, include_cash=None):
-    data = load_goal()
-    if goal is not None:
-        try:
-            data["goal"] = abs(float(goal))
-        except Exception:
-            pass
-    if monthly is not None:
-        try:
-            data["monthly"] = abs(float(monthly))
-        except Exception:
-            pass
-    if include_cash is not None:
-        data["includeCash"] = bool(include_cash)
-    save_goal(data)
-    snap = goal_snapshot()
-    return json.dumps({"ok": True, "action": "updated", "goal": snap}, ensure_ascii=False)
-def load_chat():
-    if not CHAT_FILE.exists():
-        return {"topics": [], "currentId": 1, "nextId": 2}
-    try:
-        data = json.loads(CHAT_FILE.read_text(encoding="utf-8"))
-        if not isinstance(data, dict):
-            return {"topics": [], "currentId": 1, "nextId": 2}
-        topics = data.get("topics") if isinstance(data.get("topics"), list) else []
-        return {
-            "topics": topics,
-            "currentId": data.get("currentId") or 1,
-            "nextId": data.get("nextId") or 2,
-        }
-    except Exception:
-        return {"topics": [], "currentId": 1, "nextId": 2}
-def save_chat(data):
-    if not isinstance(data, dict):
-        return
-    CHAT_FILE.write_text(json.dumps({
-        "topics": data.get("topics") if isinstance(data.get("topics"), list) else [],
-        "currentId": data.get("currentId") or 1,
-        "nextId": data.get("nextId") or 2,
-    }, indent=2), encoding="utf-8")
-def read_capital():
-    bills = load_bills()
-    holds = load_holdings()
-    cash = load_cash()
-    rh = None
-    acc, err = fetch_sheet_tab("Accounts")
-    if not err:
-        rh = robinhood_from_accounts(acc["rows"])
-    net = (rh or 0) + cash
-    snap = goal_snapshot(rh or 0, cash)
-    return json.dumps({
-        "screen": "Capital",
-        "cash_on_hand": cash,
-        "robinhood": rh,
-        "net_worth": net,
-        "monthly_bills": bills,
-        "holdings": holds,
-        "savings_goal": snap,
-    }, ensure_ascii=False)
-def load_insights_cache():
-    if not INSIGHTS_FILE.exists():
-        return None
-    try:
-        data = json.loads(INSIGHTS_FILE.read_text(encoding="utf-8"))
-        if time.time() - float(data.get("ts") or 0) < INSIGHT_TTL:
-            return data.get("rows") or []
-    except Exception:
-        return None
-    return None
-def save_insights_cache(rows):
-    INSIGHTS_FILE.write_text(json.dumps({"ts": time.time(), "rows": rows}, indent=2), encoding="utf-8")
-def claude_plain(messages, system, max_tokens=800):
-    payload = json.dumps({
-        "model": MODEL,
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": messages,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        API_URL, data=payload,
-        headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=90) as resp:
-            return json.loads(resp.read().decode("utf-8")), None
-    except urllib.error.HTTPError as e:
-        err = e.read().decode("utf-8", errors="replace")
-        try:
-            msg = json.loads(err).get("error", {}).get("message") or err
-        except Exception:
-            msg = err or str(e)
-        return None, msg
-    except Exception as e:
-        return None, str(e)
-def generate_insights(force=False):
-    cached = None if force else load_insights_cache()
-    if cached:
-        return {"ok": True, "cached": True, "rows": cached}
-    if not API_KEY:
-        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set", "rows": []}
-    cap = read_capital()
-    data, err = claude_plain(
-        [{"role": "user", "content": "Capital snapshot:\n" + cap}],
-        "You are Hope. From this live Capital snapshot write 4 useful insights for Nick. "
-        "Return ONLY a JSON array of objects: "
-        '{"tone":"up|down|warn|tip","title":"short","note":"one sentence action"}. '
-        "Use real numbers. No fake bills. No markdown. No sir.",
-        700,
-    )
-    if err or not data:
-        return {"ok": False, "error": err or "insight failed", "rows": load_insights_cache() or []}
-    raw = extract_text(data.get("content") or [])
-    rows = []
-    try:
-        m = re.search(r"\[.*\]", raw, re.S)
-        parsed = json.loads(m.group(0) if m else raw)
-        for r in parsed[:5]:
-            tone = str((r or {}).get("tone") or "tip").lower()
-            if tone not in ("up", "down", "warn", "tip"):
-                tone = "tip"
-            title = str((r or {}).get("title") or "").strip()
-            note = str((r or {}).get("note") or "").strip()
-            if title and note:
-                rows.append({"tone": tone, "title": title[:90], "note": note[:180]})
-    except Exception:
-        rows = []
-    if rows:
-        save_insights_cache(rows)
-    return {"ok": True, "cached": False, "rows": rows}
-def new_bill_id():
-    return "bill_%s_%04d" % (
-        datetime.now().strftime("%Y%m%d%H%M%S"),
-        int(time.time() * 1000) % 10000,
-    )
-def parse_due_day(text):
-    t = (text or "").lower()
-    m = re.search(r"\bdue(?:\s+on)?(?:\s+the)?\s+(\d{1,2})(?:st|nd|rd|th)?\b", t)
-    if m:
-        return max(1, min(31, int(m.group(1))))
-    m = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)\b", t)
-    if m:
-        return max(1, min(31, int(m.group(1))))
-    return None
-def parse_amount(text):
-    m = re.search(r"\$?\s*(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2}|\d+)", text or "")
-    if not m:
-        return None
-    return parse_money(m.group(1))
-def parse_bill_name(text, amount=None):
-    t = (text or "").strip()
-    t = re.sub(r"(?is)\b(add|update|monthly\s+bill|bill)\b", " ", t)
-    t = re.sub(r"(?i)\bdue(?:\s+on)?(?:\s+the)?\s+\d{1,2}(?:st|nd|rd|th)?\b", " ", t)
-    t = re.sub(r"(?i)\b\d{1,2}(?:st|nd|rd|th)\b", " ", t)
-    if amount is not None:
-        t = re.sub(r"\$?\s*" + re.escape(str(int(amount))) + r"(?:\.\d+)?", " ", t)
-        t = re.sub(r"\$?\s*" + re.escape("%.2f" % amount), " ", t)
-    t = re.sub(r"\s+", " ", t).strip(" -")
-    return t.title() if t else "Bill"
-def infer_bill(phrase, display_name=None, due_day_override=None, amount_override=None):
-    phrase = (phrase or "").strip()
-    if not phrase:
-        return None, "Need a bill name."
-    amt = amount_override if amount_override is not None else parse_amount(phrase)
-    due_day = due_day_override if due_day_override is not None else parse_due_day(phrase)
-    try:
-        due_day = max(1, min(31, int(due_day))) if due_day is not None else 1
-        due_source = "override" if due_day_override is not None else ("parsed" if parse_due_day(phrase) else "default")
-    except Exception:
-        due_day, due_source = 1, "default"
-    if amt is None:
-        amt = 0
-    label = (display_name or parse_bill_name(phrase, amt)).strip() or phrase.title()
-    now = datetime.now()
-    start, end = cycle_window(due_day, now)
-    this_due = clamp_due(now.year, now.month, due_day)
-    st = "over" if now > this_due else "pend"
-    return {
-        "id": new_bill_id(),
-        "name": label,
-        "amt": abs(float(amt)),
-        "dueDay": due_day,
-        "dueSource": due_source,
-        "cycleStart": start.strftime("%Y-%m-%d"),
-        "cycleEnd": end.strftime("%Y-%m-%d"),
-        "type": "Recurring",
-        "st": st,
-    }, None
-def upsert_bill(bill):
-    bills = load_bills()
-    idx = -1
-    bid = str(bill.get("id") or "").strip().lower()
-    name = str(bill.get("name") or "").strip().lower()
-    if bid.startswith("bill_"):
-        for i, existing in enumerate(bills):
-            if str(existing.get("id") or "").strip().lower() == bid:
-                idx = i
-                break
-    if idx < 0 and name:
-        for i, existing in enumerate(bills):
-            if str(existing.get("name") or "").strip().lower() == name:
-                idx = i
-                break
-    if idx >= 0:
-        keep_id = bills[idx].get("id") or new_bill_id()
-        if bill.get("dueSource") != "override" and bills[idx].get("dueDay"):
-            if bill.get("dueSource") == "default":
-                bill["dueDay"] = bills[idx].get("dueDay")
-                bill["dueSource"] = bills[idx].get("dueSource") or "locked"
-        if not bill.get("amt") and bills[idx].get("amt"):
-            bill["amt"] = bills[idx]["amt"]
-        bill["id"] = keep_id
-        bills[idx] = bill
-        save_bills(bills)
-        return bill, True
-    if not str(bill.get("id") or "").startswith("bill_"):
-        bill["id"] = new_bill_id()
-    bills.append(bill)
-    save_bills(bills)
-    return bill, False
-def refresh_bill_statuses(bills):
-    if not bills:
-        return bills
-    now = datetime.now()
-    out = []
-    for bill in bills:
-        if not str(bill.get("id") or "").startswith("bill_"):
-            bill["id"] = new_bill_id()
-        due_day = int(bill.get("dueDay") or 1)
-        start, end = cycle_window(due_day, now)
-        bill["cycleStart"] = start.strftime("%Y-%m-%d")
-        bill["cycleEnd"] = end.strftime("%Y-%m-%d")
-        if bill.get("st") == "paid":
-            if now >= end:
-                bill["st"] = "pend"
-        else:
-            this_due = clamp_due(now.year, now.month, due_day)
-            bill["st"] = "over" if now > this_due else "pend"
-        out.append(bill)
-    save_bills(out)
-    return out
-def add_monthly_bill(phrase, due_day=None, name=None, amount=None):
-    bill, err = infer_bill(phrase, display_name=name, due_day_override=due_day, amount_override=amount)
-    if err:
-        return err
-    saved, replaced = upsert_bill(bill)
-    return json.dumps({
-        "ok": True,
-        "action": "updated" if replaced else "added",
-        "bill": saved,
-    }, ensure_ascii=False)
-def find_bill(bills, key):
-    k = str(key or "").strip().lower()
-    if not k:
-        return -1
-    for i, b in enumerate(bills):
-        if str(b.get("id") or "").strip().lower() == k:
-            return i
-    for i, b in enumerate(bills):
-        if str(b.get("name") or "").strip().lower() == k:
-            return i
-    return -1
-def norm_status(val):
-    s = str(val or "").strip().lower()
-    if s in ("paid", "pay", "done"):
-        return "paid"
-    if s in ("over", "overdue", "unpaid", "late"):
-        return "over"
-    if s in ("pend", "pending", "upcoming"):
-        return "pend"
-    return None
-def update_monthly_bill(bill_id, name=None, due_day=None, amount=None, type_name=None, status=None):
-    bills = load_bills()
-    i = find_bill(bills, bill_id)
-    if i < 0:
-        return "No bill matched %r." % bill_id
-    if name:
-        bills[i]["name"] = str(name).strip()
-    if due_day is not None:
-        try:
-            bills[i]["dueDay"] = max(1, min(31, int(due_day)))
-            bills[i]["dueSource"] = "override"
-        except Exception:
-            pass
-    if amount is not None:
-        try:
-            bills[i]["amt"] = abs(float(amount))
-        except Exception:
-            pass
-    if type_name:
-        bills[i]["type"] = "One-Time" if "one" in str(type_name).lower() else "Recurring"
-    st = norm_status(status)
-    if st:
-        bills[i]["st"] = st
-    save_bills(bills)
-    return json.dumps({"ok": True, "action": "updated", "bill": bills[i]}, ensure_ascii=False)
-def delete_monthly_bill(bill_id):
-    bills = load_bills()
-    i = find_bill(bills, bill_id)
-    if i < 0:
-        return "No bill matched %r." % bill_id
-    removed = bills.pop(i)
-    save_bills(bills)
-    return json.dumps({"ok": True, "action": "deleted", "bill": removed}, ensure_ascii=False)
-def robinhood_from_accounts(rows):
-    found = None
-    for row in rows:
-        name = str(row.get("Name") or "").strip().lower()
-        bank = str(row.get("Bank Connection") or "").strip().lower()
-        bal = parse_money(row.get("Current Balance"))
-        if bal is None:
-            continue
-        if name == "robinhood individual":
-            return bal
-        if found is None and ("robinhood" in name or bank == "robinhood"):
-            found = bal
-    return found
-def web_search(query):
-    q = (query or "").strip()
-    if not q:
-        return "Empty query."
-    body = urllib.parse.urlencode({"q": q}).encode("utf-8")
-    try:
-        _, page = http_get(
-            "https://html.duckduckgo.com/html/",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-        )
-    except Exception as e:
-        return "Search failed: %s" % e
-    hits = []
-    for m in re.finditer(
-        r'<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-        page, re.I | re.S,
-    ):
-        url = html.unescape(m.group(1))
-        title = strip_tags(m.group(2))
-        if "uddg=" in url:
-            parsed = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
-            url = parsed.get("uddg", [url])[0]
-        if url.startswith("//"):
-            url = "https:" + url
-        if title and url.startswith("http"):
-            hits.append((title[:180], url))
-        if len(hits) >= 8:
-            break
-    if not hits:
-        return "No search hits for: %s" % q
-    lines = ["Search results for %s:" % q]
-    for i, (title, url) in enumerate(hits, 1):
-        lines.append("%d. %s\n   %s" % (i, title, url))
-    return "\n".join(lines)
-def web_fetch(url, prompt=""):
-    url = (url or "").strip()
-    if not url.startswith("http"):
-        return "Invalid URL."
-    try:
-        final, page = http_get(url, timeout=25)
-    except Exception as e:
-        return "Fetch failed for %s: %s" % (url, e)
-    text = strip_tags(page)[:12000]
-    note = "Focus: %s\n" % prompt if prompt else ""
-    return "%sURL: %s\n\n%s" % (note, final, text or "(no text)")
-def sc_client_id():
-    if _SC_CLIENT["id"] and time.time() - _SC_CLIENT["t"] < 3600:
-        return _SC_CLIENT["id"]
-    try:
-        _, home = http_get("https://soundcloud.com")
-        scripts = re.findall(r'src="(https://a-v2\.sndcdn\.com/assets/[^"]+\.js)"', home)
-        for src in scripts[-8:]:
-            try:
-                _, js = http_get(src, timeout=12)
-            except Exception:
-                continue
-            m = re.search(r'client_id["\']?\s*[:=]\s*["\']([A-Za-z0-9]{32})["\']', js)
-            if m:
-                _SC_CLIENT["id"] = m.group(1)
-                _SC_CLIENT["t"] = time.time()
-                return _SC_CLIENT["id"]
-    except Exception:
-        pass
-    return _SC_CLIENT["id"]
-def nicer_art(url):
-    if not url:
-        return ""
-    return url.replace("-large", "-t500x500").replace("-badge", "-t500x500").replace("-small", "-t500x500").replace("-tiny", "-t500x500")
-def sc_oembed(url, fallback_title):
-    title, artist, art = fallback_title, "", ""
-    try:
-        _, raw = http_get("https://soundcloud.com/oembed?format=json&url=" + urllib.parse.quote(url, safe=""))
-        meta = json.loads(raw)
-        title = meta.get("title") or fallback_title
-        art = nicer_art(meta.get("thumbnail_url") or "")
-        author = meta.get("author_name") or ""
-        if " - " in title:
-            artist, title = title.split(" - ", 1)
-        elif author:
-            artist = author
-    except Exception:
-        pass
-    return title, artist, art
-def sc_search(query):
-    q = (query or "").strip()
-    if len(q) < 2:
-        return {"url": "", "title": "", "artist": "", "art": "", "query": q}
-    cid = sc_client_id()
-    if cid:
-        api = "https://api-v2.soundcloud.com/search/tracks?q=" + urllib.parse.quote(q) + "&limit=8&client_id=" + cid
-        try:
-            _, raw = http_get(api, timeout=15)
-            data = json.loads(raw)
-            collection = data.get("collection") if isinstance(data, dict) else data
-            for item in collection or []:
-                url = item.get("permalink_url") or ""
-                if "soundcloud.com" not in url:
-                    continue
-                user = item.get("user") or {}
-                art = nicer_art(item.get("artwork_url") or user.get("avatar_url") or "")
-                title = item.get("title") or q
-                artist = user.get("username") or ""
-                if not art:
-                    t2, a2, art2 = sc_oembed(url, title)
-                    art, title, artist = art2 or art, title or t2, artist or a2
-                return {"url": url, "title": title, "artist": artist, "art": art, "query": q}
-        except Exception:
-            pass
-    return {"url": "", "title": q, "artist": "", "art": "", "query": q}
-def yahoo_quote(symbol):
-    symbol = (symbol or "").strip().upper()
-    if not symbol or not re.match(r"^[A-Z0-9.\-]{1,12}$", symbol):
-        return None
-    url = "https://query1.finance.yahoo.com/v8/finance/chart/" + urllib.parse.quote(symbol) + "?interval=1d&range=1d"
-    try:
-        req = urllib.request.Request(url, headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-            "Accept": "application/json",
-        })
-        with urllib.request.urlopen(req, timeout=8, context=CTX) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
-        result = (data.get("chart") or {}).get("result") or []
-        if not result:
-            return None
-        meta = result[0].get("meta") or {}
-        return {
-            "symbol": meta.get("symbol") or symbol,
-            "regularMarketPrice": meta.get("regularMarketPrice"),
-            "regularMarketChangePercent": meta.get("regularMarketChangePercent"),
-            "shortName": meta.get("shortName") or meta.get("longName") or symbol,
-            "currency": meta.get("currency") or "USD",
-        }
-    except Exception as e:
-        print("[quote] failed for %s: %s" % (symbol, e))
-        return None
+
 def run_tool(name, args):
     if name == "web_search":
         return web_search(args.get("query", ""))
@@ -917,30 +96,14 @@ def run_tool(name, args):
     if name == "add_monthly_bill":
         return add_monthly_bill(args.get("phrase", ""), args.get("due_day"), args.get("name"), args.get("amount"))
     if name == "update_monthly_bill":
-        return update_monthly_bill(
-            args.get("id", ""),
-            args.get("name"),
-            args.get("due_day"),
-            args.get("amount"),
-            args.get("type"),
-            args.get("status"),
-        )
+        return update_monthly_bill(args.get("id", ""), args.get("name"), args.get("due_day"), args.get("amount"), args.get("type"), args.get("status"))
     if name == "delete_monthly_bill":
         return delete_monthly_bill(args.get("id", ""))
     return "Unknown tool: %s" % name
+
 def claude(messages, system=SYSTEM):
-    payload = json.dumps({
-        "model": MODEL,
-        "max_tokens": 4096,
-        "system": system,
-        "messages": messages,
-        "tools": TOOLS,
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        API_URL, data=payload,
-        headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"},
-        method="POST",
-    )
+    payload = json.dumps({"model": MODEL, "max_tokens": 4096, "system": system, "messages": messages, "tools": TOOLS}).encode("utf-8")
+    req = urllib.request.Request(API_URL, data=payload, headers={"content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
             return json.loads(resp.read().decode("utf-8")), None
@@ -954,42 +117,9 @@ def claude(messages, system=SYSTEM):
     except Exception as e:
         return None, str(e)
 
-TEXT_ZIP_EXTS = (".txt", ".csv", ".json", ".md", ".log", ".html", ".htm", ".xml")
-def extract_zip_text(b64, per_file=80000, total=120000):
-    try:
-        raw = base64.b64decode(b64)
-    except Exception:
-        return "[zip] bad base64"
-    out = []
-    used = 0
-    try:
-        with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-            names = zf.namelist()
-            out.append("Attached zip contents: " + ", ".join(names[:40]))
-            for name in names:
-                if used >= total:
-                    out.append("[truncated more files]")
-                    break
-                low = name.lower().replace("\\", "/")
-                if name.endswith("/") or "/__macosx" in low or low.startswith("__macosx"):
-                    continue
-                if not low.endswith(TEXT_ZIP_EXTS):
-                    out.append("[skipped binary] " + name)
-                    continue
-                blob = zf.read(name)
-                try:
-                    text = blob.decode("utf-8")
-                except Exception:
-                    text = blob.decode("latin-1", errors="replace")
-                if len(text) > per_file:
-                    text = text[-per_file:]
-                used += len(text)
-                out.append("## " + name + "\n" + text)
-    except Exception as e:
-        return "[zip] " + str(e)
-    return "\n\n".join(out)[:total]
 def extract_text(content):
     return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
+
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -1012,6 +142,7 @@ def clean_block(b):
                 return {"type": "text", "text": extract_zip_text(data)}
             return {"type": "document", "source": {"type": "base64", "media_type": media, "data": data}}
     return None
+
 def clean_messages(raw_msgs):
     clean = []
     for m in raw_msgs:
@@ -1027,6 +158,7 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
+
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
@@ -1047,6 +179,7 @@ def chat_with_tools(user_messages, extra=""):
             results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
         messages.append({"role": "user", "content": results})
     return last_text or "Stopped after too many tool calls."
+
 def short_spoken(text):
     t = re.sub(r"(?is)\n*Sources:.*", "", text or "").strip()
     t = re.sub(r"[*_`#]+", "", t)
@@ -1057,27 +190,7 @@ def short_spoken(text):
     if len(recap) > 280:
         recap = recap[:277].rsplit(" ", 1)[0].rstrip(".,;:") + "."
     return recap or t[:200]
-def speak_text(text):
-    if not ELEVEN_KEY:
-        return None, "ELEVENLABS_API_KEY is not set"
-    payload = json.dumps({
-        "text": text[:1200],
-        "model_id": "eleven_multilingual_v2",
-        "voice_settings": {"stability": 0.42, "similarity_boost": 0.8},
-    }).encode("utf-8")
-    req = urllib.request.Request(
-        "https://api.elevenlabs.io/v1/text-to-speech/" + ELEVEN_VOICE,
-        data=payload,
-        headers={"xi-api-key": ELEVEN_KEY, "accept": "audio/mpeg", "content-type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.read(), None
-    except urllib.error.HTTPError as e:
-        return None, e.read().decode("utf-8", errors="replace") or str(e)
-    except Exception as e:
-        return None, str(e)
+
 class Handler(SimpleHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print("%s - %s" % (self.address_string(), fmt % args))
@@ -1150,11 +263,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400 if err.startswith("Unknown") else 502, {"error": err, "tabs": SHEET_TABS})
                 return
             rows = filter_sheet_rows(data["rows"], query, limit)
-            self._json(200, {
-                "tab": data["tab"], "headers": data["headers"],
-                "count_total": data["count"], "count_returned": len(rows),
-                "query": query, "rows": rows,
-            })
+            self._json(200, {"tab": data["tab"], "headers": data["headers"], "count_total": data["count"], "count_returned": len(rows), "query": query, "rows": rows})
             return
         if path == "/api/bills":
             bills = load_bills()
@@ -1173,8 +282,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
         if path == "/api/insights":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            force = (qs.get("force") or [""])[0] == "1"
-            self._json(200, generate_insights(force=force))
+            self._json(200, generate_insights(force=(qs.get("force") or [""])[0] == "1"))
             return
         if path == "/api/chat/history":
             self._json(200, load_chat())
@@ -1241,12 +349,7 @@ class Handler(SimpleHTTPRequestHandler):
                 t = str((h or {}).get("t") or "").strip().upper()
                 if not t:
                     continue
-                clean.append({
-                    "t": t,
-                    "name": (h or {}).get("name") or t,
-                    "price": (h or {}).get("price"),
-                    "chg": (h or {}).get("chg") or 0,
-                })
+                clean.append({"t": t, "name": (h or {}).get("name") or t, "price": (h or {}).get("price"), "chg": (h or {}).get("chg") or 0})
             save_holdings(clean)
             self._json(200, {"ok": True, "holdings": clean})
             return
@@ -1257,12 +360,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400, {"error": "Bad JSON"})
                 return
             phrase = (body.get("phrase") or body.get("name") or "").strip()
-            bill, err = infer_bill(
-                phrase,
-                display_name=body.get("displayName"),
-                due_day_override=body.get("due_day") if "due_day" in body else body.get("dueDay"),
-                amount_override=body.get("amount") if "amount" in body else body.get("amt"),
-            )
+            bill, err = infer_bill(phrase, display_name=body.get("displayName"), due_day_override=body.get("due_day") if "due_day" in body else body.get("dueDay"), amount_override=body.get("amount") if "amount" in body else body.get("amt"))
             if err:
                 self._json(400, {"error": err})
                 return
@@ -1275,14 +373,7 @@ class Handler(SimpleHTTPRequestHandler):
             except Exception:
                 self._json(400, {"error": "Bad JSON"})
                 return
-            raw = update_monthly_bill(
-                body.get("id") or body.get("phrase") or body.get("name") or "",
-                body.get("name"),
-                body.get("due_day") if "due_day" in body else body.get("dueDay"),
-                body.get("amount") if "amount" in body else body.get("amt"),
-                body.get("type"),
-                body.get("status") or body.get("st"),
-            )
+            raw = update_monthly_bill(body.get("id") or body.get("phrase") or body.get("name") or "", body.get("name"), body.get("due_day") if "due_day" in body else body.get("dueDay"), body.get("amount") if "amount" in body else body.get("amt"), body.get("type"), body.get("status") or body.get("st"))
             try:
                 self._json(200, json.loads(raw))
             except Exception:
@@ -1307,11 +398,7 @@ class Handler(SimpleHTTPRequestHandler):
                 self._json(400, {"error": "Bad JSON"})
                 return
             topics = body.get("topics") if isinstance(body.get("topics"), list) else []
-            save_chat({
-                "topics": topics,
-                "currentId": body.get("currentId") or 1,
-                "nextId": body.get("nextId") or 2,
-            })
+            save_chat({"topics": topics, "currentId": body.get("currentId") or 1, "nextId": body.get("nextId") or 2})
             self._json(200, {"ok": True, "topics": len(topics)})
             return
         if self.path != "/api/chat":
@@ -1373,6 +460,7 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(audio)
+
 if __name__ == "__main__":
     for name in ("index.html", "style.css", "widgets.css", "app.js", "maps.js", "weather.js"):
         if not (DIR / name).exists():
