@@ -310,26 +310,34 @@ aside.right::-webkit-scrollbar { display: none; }
   border: 0; background: 0; color: #8aa0bf; cursor: pointer; font-size: 14px;
 }
 .line.me .shot {
-  width: min(220px, 70vw); border-radius: 12px; margin-bottom: 6px; display: block;
+  width: min(220px, 70vw); max-width: 100%; height: auto; border-radius: 12px; margin-bottom: 6px; display: block;
 }
 .thread {
   width: min(520px, 92%);
   margin-top: 16px;
   max-height: 32vh;
   overflow-y: auto;
-  overflow-x: auto;
+  overflow-x: hidden;
   padding: 6px 2px 10px;
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .thread::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.line { display: flex; flex-direction: column; margin: 0 0 10px; max-width: 78%; }
-.line.me { margin-left: auto; align-items: flex-end; text-align: right; }
-.line.bot { margin-right: auto; align-items: flex-start; text-align: left; max-width: 92%; }
+.line { display: flex; flex-direction: column; margin: 0 0 10px; max-width: 100%; }
+.line.me { margin-left: auto; align-items: flex-end; text-align: right; max-width: 92%; }
+.line.bot { margin-right: auto; align-items: flex-start; text-align: left; max-width: 100%; }
 .who { display: none; }
-.txt { font-size: 14px; line-height: 1.45; white-space: pre-wrap; word-wrap: break-word; user-select: text; }
+.txt {
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  user-select: text;
+  max-width: 100%;
+}
 .line.me .txt { color: #cfe8ff; }
-.line.bot .txt { color: #e8f1ff; white-space: normal; }
+.line.bot .txt { color: #e8f1ff; white-space: pre-wrap; }
 .line.bot .txt strong { font-weight: 650; color: #fff; }
 .bot-card {
   background: rgba(8,16,32,0.45);
@@ -337,6 +345,7 @@ aside.right::-webkit-scrollbar { display: none; }
   border-radius: 14px;
   padding: 10px 12px 8px;
   margin: 0 0 10px;
+  max-width: 100%;
 }
 .bot-h {
   font-size: 14px;
@@ -345,10 +354,11 @@ aside.right::-webkit-scrollbar { display: none; }
   margin: 0 0 8px;
   letter-spacing: 0.02em;
 }
-.bot-p { margin: 0 0 6px; font-size: 13px; color: #d7e7ff; }
+.bot-p { margin: 0 0 6px; font-size: 13px; color: #d7e7ff; overflow-wrap: anywhere; }
 .bot-table-wrap {
   width: 100%;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
   margin: 0;
 }
@@ -513,10 +523,10 @@ aside.right::-webkit-scrollbar { display: none; }
   color: #d7e7ff; font: 600 11px Inter, sans-serif; letter-spacing: 0.1em;
   cursor: pointer; width: 100%;
 }
-.hist-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none; }
+.hist-list { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; scrollbar-width: none; -ms-overflow-style: none; }
 .hist-list::-webkit-scrollbar { width: 0; height: 0; display: none; }
 .hist-item { font-size: 12px; line-height: 1.35; color: #c5d8f0; padding: 9px 8px; border-radius: 10px; cursor: pointer; margin-bottom: 4px; }
-.hist-item .name { font-weight: 600; color: #e8f1ff; }
+.hist-item .name { font-weight: 600; color: #e8f1ff; overflow-wrap: anywhere; }
 .hist-item .meta { font-size: 10px; color: var(--dim); margin-top: 3px; }
 .hist-item:hover, .hist-item.on { background: rgba(80, 150, 255, 0.1); }
 .hist-empty { font-size: 12px; color: var(--dim); padding: 8px 4px; }
@@ -525,18 +535,36 @@ aside.right::-webkit-scrollbar { display: none; }
 .layout.chat-mode .hero {
   position: relative; left: auto; top: auto; transform: none;
   width: 100%; height: 100%; max-width: none;
-  justify-content: flex-start; padding: 8px 24px 12px; overflow: hidden;
+  justify-content: flex-start; padding: 8px 12px 12px; overflow: hidden;
 }
 .layout.chat-mode .orb-wrap { width: 88px; height: 88px; flex-shrink: 0; }
 .layout.chat-mode .core-glow { width: 58px; height: 58px; }
 .layout.chat-mode .logo-word { font-size: 10px; letter-spacing: 0.28em; }
 .layout.chat-mode .search { width: min(860px, 96%); }
 .layout.chat-mode .thread {
-  width: min(860px, 96%); max-height: none; flex: 1; min-height: 0;
-  overflow-y: auto; overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none;
+  width: min(860px, 96%);
+  max-width: 100%;
+  max-height: none;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .layout.chat-mode .thread::-webkit-scrollbar { width: 0; height: 0; display: none; }
-.layout.chat-mode .line.bot { max-width: min(720px, 96%); }
+.layout.chat-mode .line,
+.layout.chat-mode .line.bot,
+.layout.chat-mode .line.me {
+  max-width: 100%;
+}
+.layout.chat-mode .line .txt,
+.layout.chat-mode .bot-card,
+.layout.chat-mode .bot-p {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 #scPlayer {
   position: absolute;
   width: 1px;
