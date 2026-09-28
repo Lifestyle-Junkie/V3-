@@ -19,7 +19,124 @@ CASH_FILE = DIR / "hope-cash.json"
 CHAT_FILE = DIR / "hope-chat.json"
 GOAL_FILE = DIR / "hope-goal.json"
 INSIGHTS_FILE = DIR / "hope-insights.json"
+EXPORT_FILE = DIR / "hope-export.txt"
 INSIGHT_TTL = 3600
+MONTH_ALIASES = {
+    "jan": 1, "january": 1, "feb": 2, "february": 2, "mar": 3, "march": 3,
+    "apr": 4, "april": 4, "may": 5, "jun": 6, "june": 6, "jul": 7, "july": 7,
+    "aug": 8, "august": 8, "sep": 9, "sept": 9, "september": 9,
+    "oct": 10, "october": 10, "nov": 11, "november": 11, "dec": 12, "december": 12,
+}
+WA_DATE = re.compile(r"\[(\d{1,2})/(\d{1,2})/(\d{2,4})")
+MONEY_RE = re.compile(r"\$\s*([\d,]+(?:\.\d{1,2})?)")
+MIR_NUM = re.compile(r"\bmir\b[^0-9$]{0,12}(\d{2,5}(?:,\d{3})*(?:\.\d{1,2})?)", re.I)
+
+def save_export(text):
+    if not text:
+        return
+    EXPORT_FILE.write_text(text, encoding="utf-8")
+
+def load_export():
+    if not EXPORT_FILE.exists():
+        return ""
+    try:
+        return EXPORT_FILE.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+def parse_month_arg(text):
+    s = (text or "").strip().lower()
+    if not s:
+        return None
+    if s in MONTH_ALIASES:
+        return MONTH_ALIASES[s]
+    m = re.search(r"\b(20\d{2})-(\d{1,2})\b", s)
+    if m:
+        return int(m.group(2))
+    m = re.search(r"\b(\d{1,2})\s*/\s*(?:\d{2,4})\b", s)
+    if m:
+        n = int(m.group(1))
+        if 1 <= n <= 12:
+            return n
+    if s.isdigit():
+        n = int(s)
+        if 1 <= n <= 12:
+            return n
+    for name, num in MONTH_ALIASES.items():
+        if re.search(r"\b" + name + r"\b", s):
+            return num
+    return None
+
+def line_month(line):
+    m = WA_DATE.search(line)
+    if not m:
+        return None
+    return int(m.group(1))
+
+def export_index(text=None):
+    text = text if text is not None else load_export()
+    if not text.strip():
+        return "No chat export saved. Attach the WhatsApp zip once."
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    dates = WA_DATE.findall(text)
+    first = last = ""
+    if dates:
+        first = "%s/%s/%s" % dates[0]
+        last = "%s/%s/%s" % dates[-1]
+    return "Saved WhatsApp export: %d lines%s." % (
+        len(lines),
+        (" from %s to %s" % (first, last) if first else ""),
+    )
+
+def search_export(query="", month="", limit=80):
+    text = load_export()
+    if not text.strip():
+        return "No chat export on file. Attach the WhatsApp zip again, then ask."
+    phrase = " ".join(x for x in ((query or ""), (month or "")) if x).strip()
+    mo = parse_month_arg(month) or parse_month_arg(phrase)
+    words = []
+    for w in re.findall(r"[a-z0-9$]+", (query or phrase).lower()):
+        if w in MONTH_ALIASES or w in ("in", "the", "for", "and", "sales", "sale", "what", "was", "making"):
+            continue
+        if w.isdigit() and 1 <= int(w) <= 12 and mo:
+            continue
+        words.append(w)
+    hits = []
+    total = 0.0
+    money_hits = 0
+    for ln in text.splitlines():
+        if not ln.strip():
+            continue
+        if mo and line_month(ln) != mo:
+            continue
+        blob = ln.lower()
+        if words and not all(w in blob for w in words):
+            continue
+        hits.append(ln.strip())
+        found = MONEY_RE.findall(ln) or MIR_NUM.findall(ln)
+        for amt in found:
+            n = parse_money(amt)
+            if n:
+                total += n
+                money_hits += 1
+    try:
+        limit = max(1, min(int(limit or 80), 150))
+    except Exception:
+        limit = 80
+    shown = hits[:limit]
+    month_label = MONTH_NAMES[mo - 1] if mo else "any month"
+    out = [
+        export_index(text),
+        "Filter: %s | month=%s | words=%s" % (phrase or "(all)", month_label, ", ".join(words) or "(none)"),
+        "Matches: %d (showing %d)" % (len(hits), len(shown)),
+        "Dollar amounts on matching lines: %d totaling $%s" % (
+            money_hits, "{:,.2f}".format(total) if money_hits else "0.00"),
+        "",
+    ]
+    out.extend(shown)
+    if len(hits) > limit:
+        out.append("... %d more. Narrow the month or store name." % (len(hits) - limit))
+    return "\n".join(out)
 
 def parse_money(val):
     cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
