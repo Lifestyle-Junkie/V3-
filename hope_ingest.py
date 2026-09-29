@@ -15,6 +15,7 @@ DIR = Path(__file__).resolve().parent
 CORPUS_DIR = DIR / "hope-uploads"
 CORPUS_FILE = DIR / "hope-corpus.json"
 FACTS_FILE = DIR / "hope-facts.json"
+EXPORT_FILE = DIR / "hope-export.txt"
 
 TEXT_EXTS = {".txt", ".md", ".log", ".csv", ".tsv", ".json", ".xml", ".html", ".htm", ".yaml", ".yml"}
 DOC_EXTS = {".pdf", ".doc", ".docx", ".rtf"}
@@ -42,7 +43,7 @@ US_DATE = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b")
 
 
 def _now_id(prefix="up"):
-    return "%s_%s" % (prefix, datetime.now().strftime("%Y%m%d%H%M%S"))
+    return "%s_%s" % (prefix, datetime.now().strftime("%Y%m%d%H%M%S%f"))
 
 
 def _sha(text):
@@ -545,6 +546,13 @@ def ingest_zip_bytes(raw_bytes, name="upload.zip"):
             pass
         manifest.append({k: f[k] for k in ("path", "basename", "ext", "kind", "size")})
         records.extend(parse_file(f))
+    raw_parts = []
+    for f in files:
+        if f.get("kind") in ("text", "md", "log", "html", "htm", "xml", "yaml", "yml", "csv", "tsv", "json"):
+            body = _decode_bytes(f.get("bytes") or b"")
+            raw_parts.append("===== %s =====\n%s" % (f.get("path"), body))
+    if raw_parts:
+        EXPORT_FILE.write_text("\n\n".join(raw_parts), encoding="utf-8")
     records = link_attachments(records, files)
     facts = validate_facts(interpret_records(records, use_model=False))
     corpus = load_corpus()
@@ -580,7 +588,7 @@ def ingest_zip_bytes(raw_bytes, name="upload.zip"):
         "kinds": kinds,
         "records": len(records),
         "facts": len(facts),
-        "note": "Archive ingested. Ask questions; Hope will query stored records, not raw keyword hits.",
+        "note": "Archive ingested. Ask questions; Hope will query stored facts, not raw keyword hits.",
     }
 
 
@@ -590,6 +598,119 @@ def ingest_zip_b64(b64, name="upload.zip"):
     except Exception:
         return {"ok": False, "error": "bad base64"}
     return ingest_zip_bytes(raw, name)
+
+
+def load_export():
+    if not EXPORT_FILE.exists():
+        return ""
+    try:
+        return EXPORT_FILE.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _split_raw_blocks(text):
+    if not text:
+        return []
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    blocks = []
+    cur = []
+    cur_date = None
+    for line in lines:
+        ts_m = None
+        for pat in TS_PATTERNS:
+            ts_m = pat.search(line)
+            if ts_m:
+                break
+        if ts_m:
+            if cur:
+                blocks.append({"date": cur_date, "text": "\n".join(cur).strip()})
+            cur = [line]
+            cur_date = _norm_date(ts_m.group(1))
+        else:
+            cur.append(line)
+    if cur:
+        blocks.append({"date": cur_date, "text": "\n".join(cur).strip()})
+    return [b for b in blocks if b.get("text")]
+
+
+def _stop_words():
+    return {
+        "what", "was", "were", "the", "and", "for", "how", "much", "many",
+        "show", "tell", "about", "from", "with", "that", "this", "have",
+        "all", "far", "so", "only", "just", "any", "get", "give", "please",
+        "need", "want", "does", "did", "can", "could", "would", "should",
+        "into", "each", "every", "daily", "ones", "those", "these",
+    }
+
+
+def _expand_token(t):
+    t = (t or "").lower()
+    out = {t}
+    if t.endswith("s") and len(t) > 4:
+        out.add(t[:-1])
+    else:
+        out.add(t + "s")
+    aliases = {
+        "profit": ["profits", "total", "totals", "sales", "revenue"],
+        "profits": ["profit", "total", "totals", "sales", "revenue"],
+        "store": ["stores", "location", "site", "place"],
+        "stores": ["store", "location", "site", "place"],
+        "sale": ["sales", "total", "totals"],
+        "sales": ["sale", "total", "totals"],
+    }
+    out.update(aliases.get(t, []))
+    return out
+
+
+def _query_tokens(question):
+    ql = (question or "").lower()
+    raw = [t for t in re.findall(r"[a-z0-9]{3,}", ql) if t not in _stop_words()]
+    return [t for t in raw if t not in _month_tokens()]
+
+
+def _token_score(blob, tokens):
+    blob = (blob or "").lower()
+    if not tokens:
+        return 1
+    score = 0
+    for t in tokens:
+        variants = _expand_token(t)
+        if any(v in blob for v in variants):
+            score += 1
+    return score
+
+
+def _want_latest_only(question):
+    ql = (question or "").lower()
+    return bool(re.search(
+        r"\b(latest (file|upload|zip)|this upload|this zip|only this|just the latest|newest upload)\b",
+        ql,
+    ))
+
+
+def search_raw_export(question, limit=80):
+    text = load_export()
+    if not text:
+        return []
+    month = _month_from_text(question)
+    tokens = _query_tokens(question)
+    scored = []
+    for b in _split_raw_blocks(text):
+        blob = (b.get("text") or "").lower()
+        s = _token_score(blob, tokens)
+        if tokens and s <= 0:
+            continue
+        d = b.get("date")
+        if month and d:
+            try:
+                if int(str(d)[5:7]) != month:
+                    continue
+            except Exception:
+                pass
+        scored.append((s, b))
+    scored.sort(key=lambda x: -x[0])
+    return [b for s, b in scored[:limit]]
 
 
 def _month_from_text(q):
@@ -629,31 +750,28 @@ def query_facts(question, limit=40):
     corpus = load_corpus()
     records = corpus.get("records") or []
     uploads = corpus.get("uploads") or []
-    if not facts and not records:
+    if not facts and not records and not load_export():
         return "No uploaded archive on file. Attach a zip first."
-    ql = q.lower()
-    want_all = bool(re.search(r"\b(all uploads|every zip|previous zip|older zip|both zips)\b", ql))
+    latest_only = _want_latest_only(q)
     latest = uploads[-1]["id"] if uploads else None
-    if latest and not want_all:
+    skipped = 0
+    if latest_only and latest:
         records = [r for r in records if r.get("upload_id") == latest]
         facts = [f for f in facts if f.get("upload_id") == latest]
+        skipped = max(0, len(uploads) - 1)
     month = _month_from_text(q)
-    stop = {
-        "what", "was", "were", "the", "and", "for", "how", "much", "many",
-        "show", "tell", "about", "from", "with", "that", "this", "have",
-        "all", "far", "so", "only", "just", "any", "get", "give",
-    }
-    tokens = [t for t in re.findall(r"[a-z0-9]{3,}", ql) if t not in stop]
-    need = [t for t in tokens if t not in _month_tokens()]
+    need = _query_tokens(q)
     try:
         cap = max(1, min(int(limit or 40), 200))
     except Exception:
         cap = 40
 
+    raw_hits = search_raw_export(q, cap)
     rec_hits = []
     for r in records:
         blob = _record_blob(r)
-        if need and not all(t in blob for t in need):
+        s = _token_score(blob, need)
+        if need and s <= 0:
             continue
         d = r.get("date")
         if month and d:
@@ -662,35 +780,55 @@ def query_facts(question, limit=40):
                     continue
             except Exception:
                 pass
-        rec_hits.append(r)
+        rec_hits.append((s, r))
+    rec_hits.sort(key=lambda x: -x[0])
+    rec_hits = [r for s, r in rec_hits]
 
-    if not rec_hits:
+    seen_txt = set()
+    source_hits = []
+    for b in raw_hits:
+        key = (b.get("date"), (b.get("text") or "")[:180])
+        if key in seen_txt:
+            continue
+        seen_txt.add(key)
+        source_hits.append(b)
+    for r in rec_hits:
+        body = r.get("text") or r.get("raw") or ""
+        key = (r.get("date"), body[:180])
+        if key in seen_txt:
+            continue
+        seen_txt.add(key)
+        source_hits.append({"date": r.get("date"), "text": body, "upload_id": r.get("upload_id")})
+    if not source_hits:
         return "No matching records in uploaded archives for %r." % q
 
     by_day = {}
-    for r in rec_hits:
+    for r in source_hits:
         by_day.setdefault(r.get("date") or "unknown", []).append(r)
 
+    scope = "latest upload only" if latest_only else "all uploads"
     lines = [
         "Query: %s" % q,
-        "Archive scope: %s" % ("all uploads" if want_all else "latest upload only"),
-        "Matching records: %d across %d day(s): %s" % (
-            len(rec_hits), len(by_day), ", ".join(sorted(by_day))),
+        "Archive scope: %s (%d upload(s) on file)" % (scope, len(uploads) or 1),
+        "Source: merged extracted text + parsed records",
+        "Matching blocks: %d across %d day(s): %s" % (
+            len(source_hits), len(by_day), ", ".join(sorted(by_day))),
         "Raw evidence follows. Interpret it. Do not assume a schema. Do not invent missing days.",
         "",
     ]
+    if latest_only and skipped:
+        lines.insert(2, "Note: %d older upload(s) were excluded because you asked for the latest file only." % skipped)
     shown = 0
     for day in sorted(by_day):
-        lines.append("## %s (%d records)" % (day, len(by_day[day])))
+        lines.append("## %s (%d blocks)" % (day, len(by_day[day])))
         for r in by_day[day]:
-            body = (r.get("text") or r.get("raw") or "").strip()
-            if len(body) > 1200:
-                body = body[:1200] + " …"
-            lines.append("[%s | %s]" % (r.get("date") or "?", r.get("actor") or "?"))
+            body = (r.get("text") or "").strip()
+            if len(body) > 2000:
+                body = body[:2000] + " …"
             lines.append(body)
             lines.append("")
             shown += 1
             if shown >= cap:
-                lines.append("… truncated at %d records. Narrow the question." % cap)
+                lines.append("… truncated at %d blocks. Narrow the question." % cap)
                 return "\n".join(lines)
     return "\n".join(lines)
