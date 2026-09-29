@@ -715,12 +715,13 @@ def archive_inventory(question=""):
             if not re.search(r"^(break|back|here|out|in|ok|yes|no|image|audio|video)\b", first, re.I):
                 headings[first] = headings.get(first, 0) + 1
     dates = sorted(set(dates))
+    n_up = len(load_corpus().get("uploads") or [])
+    d0 = dates[0] if dates else "?"
+    d1 = dates[-1] if dates else "?"
     lines = [
         "FULL FILE SCAN (not a sample):",
-        "chars=%d records=%d uploads=%d" % (
-            len(text), len(records), len((load_corpus().get("uploads") or []))),
-        ),
-        "date_range=%s .. %s" % (dates[0] if dates else "?", dates[-1] if dates else "?"),
+        "chars=%d records=%d uploads=%d" % (len(text), len(records), n_up),
+        "date_range=%s .. %s" % (d0, d1),
     ]
     if counts:
         lines.append("query token hits in full text: " + ", ".join("%s=%d" % (k, v) for k, v in counts.items()))
@@ -848,14 +849,14 @@ def query_facts(question, limit=40):
         by_day.setdefault(r.get("date") or "unknown", []).append(r)
 
     scope = "latest upload only" if latest_only else "all uploads"
+    day_list = ", ".join(sorted(by_day))
     lines = [
         archive_inventory(q),
         "",
         "Query: %s" % q,
         "Archive scope: %s (%d upload(s) on file)" % (scope, len(uploads) or 1),
         "Source: merged extracted text + parsed records",
-        "Matching blocks: %d across %d day(s): %s" % (
-            len(source_hits), len(by_day), ", ".join(sorted(by_day))),
+        "Matching blocks: %d across %d day(s): %s" % (len(source_hits), len(by_day), day_list),
         "Do not claim a name is absent unless FULL FILE SCAN token hits are 0. This block list is a subset, not the whole file.",
         "",
     ]
