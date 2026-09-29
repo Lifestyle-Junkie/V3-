@@ -6,7 +6,6 @@ if (typeof insertChatMapsCard !== "function") window.insertChatMapsCard = functi
 if (typeof ensureMap !== "function") window.ensureMap = function () {};
 if (typeof resizeHomeMap !== "function") window.resizeHomeMap = function () {};
 if (typeof goToWeatherTab !== "function") window.goToWeatherTab = function () { if (typeof setView === "function") setView("weather"); };
-
 const input = document.getElementById("ask");
 const form = document.getElementById("askForm");
 const thread = document.getElementById("thread");
@@ -18,14 +17,14 @@ const mhSearchForm = document.getElementById("mhSearchForm");
 const mhSearch = document.getElementById("mhSearch");
 const widgetSource = { maps: ".card.nearby", stocks: ".card.markets", weather: ".card.weather", music: ".card.music" };
 const VIEW_ORDER = ["home", "chat", "music", "maps", "weather", "capital"];
-
 let busy = false, topics = [{ id: 1, title: "New topic", messages: [] }], currentId = 1, nextId = 2;
 let pendingFiles = [], musicPlaying = false, scWidget = null, dragX = null;
 let currentSong = { title: "Nothing playing", artist: "Search a song", art: "", url: "" };
-
 function $(id) { return document.getElementById(id); }
 function isZipFile(file, media) {
-  return (((file && file.name) || "").toLowerCase().endsWith(".zip") || String(media || (file && file.type) || "").toLowerCase().indexOf("zip") !== -1);
+  const name = String((file && file.name) || "").toLowerCase();
+  const typ = String(media || (file && file.type) || "").toLowerCase();
+  return name.endsWith(".zip") || typ.indexOf("zip") !== -1;
 }
 function slimContent(content) {
   if (typeof content === "string") return content;
@@ -93,7 +92,6 @@ function messagesForHope() {
   }
   return out.length > 50 ? out.slice(-50) : out;
 }
-
 function tickClock() {
   const now = new Date(), months = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
   const dateEl = $("dateLabel"), timeEl = $("timeLabel");
@@ -105,7 +103,6 @@ tickClock(); setInterval(tickClock, 1000);
 if ($("collapseBtn") && layout) $("collapseBtn").addEventListener("click", function () { layout.classList.toggle("collapsed"); });
 if ($("histCollapse") && layout) $("histCollapse").addEventListener("click", function () { layout.classList.toggle("hist-hid"); });
 if ($("newTopic")) $("newTopic").addEventListener("click", startTopic);
-
 function hideHuds() {
   ["musicHud","mapsHud","weatherHud","capitalHud"].forEach(function (id) {
     const el = $(id); if (!el) return; el.style.cssText = ""; el.style.setProperty("display","none","important");
@@ -157,7 +154,6 @@ document.querySelectorAll(".nav-item").forEach(function (item) {
     setView(fromAttr || fromLabel || "home");
   });
 });
-
 function currentTopic() { return topics.find(function (t) { return t.id === currentId; }) || topics[0]; }
 function shortTitle(text) { const s = (text || "").replace(/\s+/g, " ").trim(); return s.length > 36 ? s.slice(0, 36) + "…" : s || "New topic"; }
 function textFromContent(content) {
@@ -231,7 +227,6 @@ function detectWidget(text) {
   if (/\bstocks?|markets?|holdings|capital|net worth|bills\b/.test(q)) return "capital";
   return null;
 }
-
 function fileToDataUrl(file) {
   return new Promise(function (resolve, reject) { const r = new FileReader(); r.onload = function () { resolve(r.result); }; r.onerror = reject; r.readAsDataURL(file); });
 }
@@ -262,9 +257,11 @@ function renderAttachRow() {
   });
 }
 async function addFiles(list) {
+  if (!list || !list.length) return;
   for (let i = 0; i < list.length; i++) {
     const file = list[i]; if (!file) continue;
-    const zip = isZipFile(file); if (file.size > (zip ? 12 : 8) * 1024 * 1024) continue;
+    const zip = isZipFile(file);
+    if (file.size > (zip ? 20 : 8) * 1024 * 1024) continue;
     const dataUrl = zip ? await fileToDataUrl(file) : await shrinkImage(file);
     if (!dataUrl || typeof dataUrl !== "string") continue;
     const parts = dataUrl.split(","), meta = parts[0] || "", data = parts[1] || "";
@@ -288,9 +285,15 @@ function blocksFromPending(text) {
   else if (blocks.length) blocks.push({ type: "text", text: "Look at the attached photo and help with what you see." });
   return blocks;
 }
+function openFilePick() {
+  const filePick = $("filePick");
+  if (!filePick) return;
+  try { filePick.click(); } catch (e) {}
+}
 const attachBtn = $("attachBtn"), filePick = $("filePick");
 if (attachBtn && filePick) {
-  attachBtn.addEventListener("click", function () { filePick.click(); });
+  attachBtn.addEventListener("click", function (e) { e.preventDefault(); openFilePick(); });
+  attachBtn.addEventListener("touchend", function (e) { e.preventDefault(); openFilePick(); }, { passive: false });
   filePick.addEventListener("change", async function () { await addFiles(filePick.files); filePick.value = ""; });
 }
 document.addEventListener("paste", async function (e) {
@@ -305,7 +308,6 @@ if (dropTarget) {
   ["dragleave","drop"].forEach(function (ev) { dropTarget.addEventListener(ev, function (e) { e.preventDefault(); dropTarget.classList.remove("drop"); }); });
   dropTarget.addEventListener("drop", async function (e) { if (e.dataTransfer && e.dataTransfer.files) await addFiles(e.dataTransfer.files); });
 }
-
 function artUrl(raw) {
   return String(raw || "").replace("-large.","-t500x500.").replace("-badge.","-t500x500.").replace("-small.","-t500x500.").replace("-tiny.","-t500x500.");
 }
@@ -350,7 +352,6 @@ function insertChatMusicCard() {
 }
 function sayHope(text) { const fn = window.speakHope || speakHope; if (typeof fn === "function" && text) fn(text); }
 function doneSend() { busy = false; if (input) input.focus(); }
-
 async function sendUserText(text) {
   text = (text || "").trim();
   if ((!text && !pendingFiles.length) || busy) return;
@@ -360,7 +361,6 @@ async function sendUserText(text) {
   renderUserContent(payload); topic.messages.push({ role: "user", content: payload }); pendingFiles = []; renderAttachRow();
   if (topic.title === "New topic") topic.title = shortTitle(text || (hasZip ? "Zip" : "Photo"));
   renderTopics(); saveChatHistory(); if (input) input.value = "";
-
   function widgetDone(name, extra) {
     if (extra) extra();
     topic.messages.push({ role: "widget", content: name }); saveChatHistory(); doneSend();
@@ -383,7 +383,6 @@ async function sendUserText(text) {
   if (widgetName === "maps") return widgetDone("maps", insertChatMapsCard);
   if (widgetName === "capital") return widgetDone("capital", goToCapitalTab);
   if (widgetName) return widgetDone(widgetName, function () { openWidget(widgetName); });
-
   const waiting = addLine("Hope", hasZip ? "Opening zip…" : "Searching…", "bot");
   startThink(waiting);
   try {
@@ -398,7 +397,6 @@ async function sendUserText(text) {
   } catch (err) { stopThink(waiting); if (waiting) waiting.textContent = "Can't reach backend."; }
   if (thread) thread.scrollTop = thread.scrollHeight; doneSend();
 }
-
 if (form) form.addEventListener("submit", async function (e) { e.preventDefault(); await sendUserText(input ? input.value : ""); });
 if (mhPlay) mhPlay.addEventListener("click", function () {
   bootSc(); if (!scWidget) return;
@@ -408,7 +406,6 @@ if (mhSearchForm) mhSearchForm.addEventListener("submit", async function (e) {
   e.preventDefault(); const q = ((mhSearch && mhSearch.value) || "").trim(); if (q) try { await requestSong(q); } catch (err) {}
 });
 if (document.readyState === "complete") bootSc(); else window.addEventListener("load", bootSc);
-
 function currentView() {
   const on = document.querySelector(".nav-item.active");
   const v = ((on && on.getAttribute("data-view")) || "").toLowerCase();
