@@ -43,27 +43,27 @@ API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 MAPS_KEY = os.environ.get("GOOGLE_MAPS_KEY", "").strip()
 MODEL = "claude-sonnet-5"
 API_URL = "https://api.anthropic.com/v1/messages"
-MAX_TOOL_ROUNDS = 8
+MAX_TOOL_ROUNDS = 10
 SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Who you serve
 - You were created by Nick. He is your creator.
 - The person talking to you is always Nick. Address him as sir in every reply.
 # Context
-- Today is Saturday, September 26, 2026.
+- Today is Tuesday, September 29, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time).
 - Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal, search_export.
 - Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
 - update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
 - delete_monthly_bill: by id or exact name.
-- read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings, AND the savings goal tracker (goal, monthly target, saved = RH+cash, percent, hit date, this month on-pace/behind). Use this whenever Nick asks about money, goal, or if he is behind.
+- read_capital: Capital screen — cash on hand, Robinhood, net worth, monthly bills, ticker holdings, AND the savings goal tracker. Use this whenever Nick asks about money, goal, or if he is behind.
 - set_savings_goal: set goal amount and/or monthly save and/or include_cash. Do not ask extra questions.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
-- Chat history from every topic may be included in the messages. Treat earlier topics as memory. Do not pretend you forgot something Nick already said in another topic.
-- If Nick attaches a zip, ingest it and call search_export with his question. Do not assume folder layout, company names, or keywords. Never treat a missing value as zero.
-- Stock what-ifs ("if NVDA hits 55") stay in chat. Do not change the official goal date for a hypothetical.
+- Chat history from every topic may be included in the messages. Treat earlier topics as memory.
+- If a zip was attached this turn, it is ALREADY ingested. Archive evidence may already be in this prompt under "# Uploaded archive". Answer from that first. Call search_export at most ONCE, and only if that block is missing or the question is a new slice. Never loop the same tool with the same arguments. Never invent zeros for missing values.
+- Stock what-ifs stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
-When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables for Hope cards.
+When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables.
 Short, direct. Include sir once. Live facts from tools only.
 Always end live answers with:
 Sources:
@@ -79,7 +79,7 @@ TOOLS = [
     {"name": "add_monthly_bill", "description": "Add a bill from a phrase. No sheet.", "input_schema": {"type": "object", "properties": {"phrase": {"type": "string"}, "due_day": {"type": "integer"}, "name": {"type": "string"}, "amount": {"type": "number"}}, "required": ["phrase"]}},
     {"name": "update_monthly_bill", "description": "Update a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "due_day": {"type": "integer"}, "amount": {"type": "number"}, "type": {"type": "string"}, "status": {"type": "string"}}, "required": ["id"]}},
     {"name": "delete_monthly_bill", "description": "Delete a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
-    {"name": "search_export", "description": "Query facts extracted from an uploaded zip/archive. Pass the user's question. Do not assume a vendor or keyword list.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
+    {"name": "search_export", "description": "Query an already-ingested zip. Use at most once per turn if archive evidence is not already in the prompt.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
 ]
 def run_tool(name, args):
     if name == "web_search":
@@ -118,6 +118,37 @@ def claude(messages, system=SYSTEM):
         return None, str(e)
 def extract_text(content):
     return "".join((b.get("text") or "") for b in (content or []) if isinstance(b, dict) and b.get("type") == "text").strip()
+def last_user_question(msgs):
+    for m in reversed(msgs or []):
+        if m.get("role") != "user":
+            continue
+        c = m.get("content")
+        if isinstance(c, str) and c.strip():
+            return c.strip()
+        if isinstance(c, list):
+            parts = []
+            for b in c:
+                if isinstance(b, dict) and b.get("type") == "text":
+                    t = (b.get("text") or "").strip()
+                    if t and not t.startswith("{") and "Ask questions" not in t:
+                        parts.append(t)
+            if parts:
+                return parts[-1]
+    return ""
+def archive_was_ingested(msgs):
+    blob = json.dumps(msgs)
+    return "Ask questions; use search_export." in blob or '"ok": true' in blob.lower()
+def preload_archive(msgs):
+    if not archive_was_ingested(msgs) and not export_index():
+        return ""
+    q = last_user_question(msgs) or "summarize the uploaded archive"
+    try:
+        evidence = search_export(q, "", 80)
+    except Exception as e:
+        evidence = str(e)
+    if not evidence:
+        return ""
+    return "\n\n# Uploaded archive (already ingested — do not tool-loop this)\n" + evidence[:18000]
 def clean_block(b):
     if not isinstance(b, dict):
         return None
@@ -161,26 +192,50 @@ def clean_messages(raw_msgs):
         if blocks:
             clean.append({"role": role, "content": blocks})
     return clean
+def tool_key(name, args):
+    try:
+        return name + ":" + json.dumps(args or {}, sort_keys=True, default=str)
+    except Exception:
+        return name + ":?"
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
-    system = SYSTEM + (extra or "")
+    archive = preload_archive(messages)
+    system = SYSTEM + (extra or "") + archive
+    seen = set()
+    search_used = 0
     for _ in range(MAX_TOOL_ROUNDS):
         data, err = claude(messages, system)
         if err:
-            return err
+            return last_text or err
         content = data.get("content") or []
-        last_text = extract_text(content)
+        last_text = extract_text(content) or last_text
         uses = [b for b in content if isinstance(b, dict) and b.get("type") == "tool_use"]
         if not uses:
             return last_text or "(empty reply)"
-        messages.append({"role": "assistant", "content": content})
+        fresh = []
         results = []
         for b in uses:
-            out = run_tool(b.get("name"), b.get("input") or {})
-            results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": out[:20000]})
+            name = b.get("name")
+            args = b.get("input") or {}
+            key = tool_key(name, args)
+            if name == "search_export":
+                search_used += 1
+                if archive and search_used > 1:
+                    results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": "Archive already in the prompt. Answer from # Uploaded archive. Do not call search_export again."})
+                    continue
+            if key in seen:
+                results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": "Duplicate tool call skipped. Answer now."})
+                continue
+            seen.add(key)
+            fresh.append(b)
+            out = run_tool(name, args)
+            results.append({"type": "tool_result", "tool_use_id": b.get("id"), "content": (out or "")[:20000]})
+        messages.append({"role": "assistant", "content": content})
         messages.append({"role": "user", "content": results})
-    return last_text or "Stopped after too many tool calls."
+        if not fresh:
+            break
+    return last_text or "I already pulled the archive sir. Ask a narrower question about a date, name, or number."
 def short_spoken(text):
     t = re.sub(r"(?is)\n*Sources:.*", "", text or "").strip()
     t = re.sub(r"[*_`#]+", "", t)
