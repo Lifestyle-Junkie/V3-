@@ -10,20 +10,17 @@ import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
-
 DIR = Path(__file__).resolve().parent
 CORPUS_DIR = DIR / "hope-uploads"
 CORPUS_FILE = DIR / "hope-corpus.json"
 FACTS_FILE = DIR / "hope-facts.json"
 EXPORT_FILE = DIR / "hope-export.txt"
-
 TEXT_EXTS = {".txt", ".md", ".log", ".csv", ".tsv", ".json", ".xml", ".html", ".htm", ".yaml", ".yml"}
 DOC_EXTS = {".pdf", ".doc", ".docx", ".rtf"}
 SHEET_EXTS = {".xlsx", ".xls", ".ods"}
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".heic", ".tif", ".tiff"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".ogg", ".opus", ".aac"}
 VIDEO_EXTS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
-
 TS_PATTERNS = [
     re.compile(r"^[\[\(]?\s*(\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4})[,\sT]+(\d{1,2}:\d{2}(?::\d{2})?(?:\s*[AP]M)?)", re.I),
     re.compile(r"^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2}(?::\d{2})?)"),
@@ -40,16 +37,13 @@ LINE_AMOUNT = re.compile(
 STORE_LINE = re.compile(r"(?im)^\s*(?:store\s*name|location|site|place)\s*[:\-]\s*(.+)$")
 ISO_DATE = re.compile(r"\b(20\d{2}|19\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
 US_DATE = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b")
-
-
+TOTAL_LINE = re.compile(
+    r"(?im)\b(total|grand total|net|sales|profit|revenue)\b[^\n$]{0,24}\$?\s*([\d,]+(?:\.\d{1,2})?)"
+)
 def _now_id(prefix="up"):
     return "%s_%s" % (prefix, datetime.now().strftime("%Y%m%d%H%M%S%f"))
-
-
 def _sha(text):
     return hashlib.sha1((text or "").encode("utf-8", errors="replace")).hexdigest()[:16]
-
-
 def _kind_for(name):
     ext = Path(name).suffix.lower()
     if ext in TEXT_EXTS:
@@ -67,8 +61,6 @@ def _kind_for(name):
     if ext == ".zip":
         return "archive"
     return "binary"
-
-
 def _decode_bytes(blob):
     for enc in ("utf-8", "utf-8-sig", "utf-16", "latin-1"):
         try:
@@ -76,8 +68,6 @@ def _decode_bytes(blob):
         except Exception:
             continue
     return blob.decode("utf-8", errors="replace")
-
-
 def _norm_date(raw):
     s = (raw or "").strip()
     if not s:
@@ -99,16 +89,12 @@ def _norm_date(raw):
         if 1 <= mo <= 12 and 1 <= d <= 31:
             return "%04d-%02d-%02d" % (y, mo, d)
     return None
-
-
 def _parse_money(val):
     cleaned = re.sub(r"[^0-9.\-]", "", str(val or ""))
     try:
         return float(cleaned) if cleaned else None
     except Exception:
         return None
-
-
 def load_corpus():
     if not CORPUS_FILE.exists():
         return {"uploads": [], "records": []}
@@ -121,12 +107,8 @@ def load_corpus():
         return data
     except Exception:
         return {"uploads": [], "records": []}
-
-
 def save_corpus(data):
     CORPUS_FILE.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 def load_facts():
     if not FACTS_FILE.exists():
         return []
@@ -135,12 +117,8 @@ def load_facts():
         return data if isinstance(data, list) else []
     except Exception:
         return []
-
-
 def save_facts(rows):
     FACTS_FILE.write_text(json.dumps(rows, indent=2, ensure_ascii=False), encoding="utf-8")
-
-
 def discover_zip(raw_bytes):
     files = []
     try:
@@ -165,21 +143,17 @@ def discover_zip(raw_bytes):
             "bytes": blob,
         })
     return files, None
-
-
 def _split_records_from_text(path, text):
     records = []
     lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
     current = None
     idx = 0
-
     def flush():
         nonlocal current, idx
         if current:
             current["text"] = current.get("text", "").strip()
             records.append(current)
             current = None
-
     for line in lines:
         raw = line.rstrip()
         if not raw.strip():
@@ -226,8 +200,6 @@ def _split_records_from_text(path, text):
             })
     flush()
     return records
-
-
 def _parse_csv_records(path, text):
     rows = []
     try:
@@ -255,8 +227,6 @@ def _parse_csv_records(path, text):
     except Exception:
         return _split_records_from_text(path, text)
     return rows
-
-
 def _parse_json_records(path, text):
     try:
         data = json.loads(text)
@@ -298,8 +268,6 @@ def _parse_json_records(path, text):
                 "attachments": [],
             })
     return out
-
-
 def parse_file(entry):
     kind = entry["kind"]
     path = entry["path"]
@@ -327,8 +295,6 @@ def parse_file(entry):
         r.setdefault("kind", kind)
         r.setdefault("attachments", [])
     return recs
-
-
 def link_attachments(records, files):
     by_base = {}
     for f in files:
@@ -344,8 +310,6 @@ def link_attachments(records, files):
         if omitted and rec.get("source_file"):
             rec["flags"] = list(set((rec.get("flags") or []) + ["unreadable_or_omitted_attachment"]))
     return records
-
-
 def _heading_entity(text, actor=None):
     t = (text or "").strip()
     if not t:
@@ -359,8 +323,6 @@ def _heading_entity(text, actor=None):
         if not re.search(r"^(break|back|here|out|in|ok|yes|no)\b", first, re.I):
             return first
     return actor
-
-
 def _local_facts_from_record(rec):
     facts = []
     text = rec.get("text") or rec.get("raw") or ""
@@ -371,7 +333,6 @@ def _local_facts_from_record(rec):
     rec["entity"] = entity
     source = rec.get("source_file")
     rid = rec.get("id")
-
     def add(concept, value, unit=None, entity=None, ctx="", conf=0.55, method="pattern"):
         if value is None:
             return
@@ -390,7 +351,6 @@ def _local_facts_from_record(rec):
             "source_attachment": (rec.get("attachments") or [None])[0],
             "method": method,
         })
-
     for k, v in fields.items():
         n = _parse_money(v)
         if n is not None and re.search(r"[\d]", str(v)):
@@ -400,14 +360,12 @@ def _local_facts_from_record(rec):
             if re.search(r"date|time", str(k), re.I):
                 continue
             add(str(k).strip(), str(v).strip(), None, entity, "%s=%s" % (k, v), 0.5, "field")
-
     for m in LINE_AMOUNT.finditer(text):
         label = re.sub(r"\s+", " ", m.group(1)).strip(" :-")
         n = _parse_money(m.group(2))
         if n is None or len(label) < 2:
             continue
         add(label, n, "currency" if "$" in m.group(0) else "number", entity, m.group(0), 0.7, "line")
-
     for m in NUM_LABELED.finditer(text):
         label = re.sub(r"\s+", " ", m.group(1)).strip(" :-")
         n = _parse_money(m.group(2))
@@ -415,7 +373,6 @@ def _local_facts_from_record(rec):
             continue
         unit = "currency" if "$" in m.group(0) else "number"
         add(label, n, unit, entity, m.group(0), 0.62, "labeled")
-
     for m in MONEY_ANY.finditer(text):
         raw = m.group(1) or m.group(2)
         n = _parse_money(raw)
@@ -427,64 +384,14 @@ def _local_facts_from_record(rec):
         if pref:
             label = pref.group(1).strip()
         add(label, n, "currency", entity, window.strip(), 0.5, "amount")
-
     if not facts and text.strip():
         add("note", text.strip()[:300], None, actor, text[:240], 0.25, "text")
     return facts
-
-
 def interpret_records(records, use_model=False):
     facts = []
     for rec in records:
         facts.extend(_local_facts_from_record(rec))
-    if use_model:
-        try:
-            from hope_store import claude_plain
-            sample = records[:12]
-            payload = json.dumps([{
-                "id": r.get("id"),
-                "date": r.get("date"),
-                "actor": r.get("actor"),
-                "text": (r.get("text") or "")[:400],
-            } for r in sample], ensure_ascii=False)
-            data, err = claude_plain(
-                [{"role": "user", "content": payload}],
-                "Extract generic facts from these records. Return ONLY JSON array of "
-                '{"source_record","entity","date","concept","value","unit","confidence","context"}. '
-                "Discover concept names from the text. Do not invent missing numbers. "
-                "Do not assume a business domain.",
-                900,
-            )
-            if not err and data:
-                raw = ""
-                for b in data.get("content") or []:
-                    if isinstance(b, dict) and b.get("type") == "text":
-                        raw += b.get("text") or ""
-                m = re.search(r"\[.*\]", raw, re.S)
-                extra = json.loads(m.group(0) if m else raw)
-                for f in extra:
-                    if not isinstance(f, dict):
-                        continue
-                    facts.append({
-                        "id": "fact_" + _sha(json.dumps(f, sort_keys=True)),
-                        "entity": f.get("entity"),
-                        "date": f.get("date"),
-                        "time": None,
-                        "source": None,
-                        "concept": f.get("concept") or "value",
-                        "value": f.get("value"),
-                        "unit": f.get("unit"),
-                        "context": str(f.get("context") or "")[:240],
-                        "confidence": float(f.get("confidence") or 0.45),
-                        "source_record": f.get("source_record"),
-                        "source_attachment": None,
-                        "method": "model",
-                    })
-        except Exception:
-            pass
     return facts
-
-
 def validate_facts(facts):
     out = []
     seen = set()
@@ -508,25 +415,7 @@ def validate_facts(facts):
         except Exception:
             f["confidence"] = 0.4
         out.append(f)
-    by_rec = {}
-    for f in out:
-        by_rec.setdefault(f.get("source_record"), []).append(f)
-    for rec_id, group in by_rec.items():
-        nums = [g for g in group if isinstance(g.get("value"), (int, float))]
-        if len(nums) < 2:
-            continue
-        vals = [float(g["value"]) for g in nums]
-        mx = max(vals)
-        rest = sum(v for v in vals if v != mx)
-        if mx > 0 and abs(rest - mx) / max(mx, 1) < 0.02 and rest > 0:
-            for g in nums:
-                if float(g["value"]) == mx:
-                    g["role_hint"] = "possible_total"
-                else:
-                    g["role_hint"] = "possible_component"
     return out
-
-
 def ingest_zip_bytes(raw_bytes, name="upload.zip"):
     files, err = discover_zip(raw_bytes)
     if err:
@@ -590,16 +479,12 @@ def ingest_zip_bytes(raw_bytes, name="upload.zip"):
         "facts": len(facts),
         "note": "Archive ingested. Ask questions; Hope will query stored facts, not raw keyword hits.",
     }
-
-
 def ingest_zip_b64(b64, name="upload.zip"):
     try:
         raw = base64.b64decode(b64)
     except Exception:
         return {"ok": False, "error": "bad base64"}
     return ingest_zip_bytes(raw, name)
-
-
 def load_export():
     if not EXPORT_FILE.exists():
         return ""
@@ -607,8 +492,6 @@ def load_export():
         return EXPORT_FILE.read_text(encoding="utf-8")
     except Exception:
         return ""
-
-
 def _split_raw_blocks(text):
     if not text:
         return []
@@ -632,8 +515,6 @@ def _split_raw_blocks(text):
     if cur:
         blocks.append({"date": cur_date, "text": "\n".join(cur).strip()})
     return [b for b in blocks if b.get("text")]
-
-
 def _stop_words():
     return {
         "what", "was", "were", "the", "and", "for", "how", "much", "many",
@@ -641,9 +522,8 @@ def _stop_words():
         "all", "far", "so", "only", "just", "any", "get", "give", "please",
         "need", "want", "does", "did", "can", "could", "would", "should",
         "into", "each", "every", "daily", "ones", "those", "these",
+        "full", "entire", "whole", "month", "monthly",
     }
-
-
 def _expand_token(t):
     t = (t or "").lower()
     out = {t}
@@ -661,14 +541,10 @@ def _expand_token(t):
     }
     out.update(aliases.get(t, []))
     return out
-
-
 def _query_tokens(question):
     ql = (question or "").lower()
     raw = [t for t in re.findall(r"[a-z0-9]{3,}", ql) if t not in _stop_words()]
     return [t for t in raw if t not in _month_tokens()]
-
-
 def _token_score(blob, tokens):
     blob = (blob or "").lower()
     if not tokens:
@@ -679,16 +555,101 @@ def _token_score(blob, tokens):
         if any(v in blob for v in variants):
             score += 1
     return score
-
-
 def _want_latest_only(question):
     ql = (question or "").lower()
     return bool(re.search(
         r"\b(latest (file|upload|zip)|this upload|this zip|only this|just the latest|newest upload)\b",
         ql,
     ))
-
-
+def _month_from_text(q):
+    names = {
+        "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+        "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
+        "august": 8, "aug": 8, "september": 9, "sept": 9, "sep": 9,
+        "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+    }
+    ql = (q or "").lower()
+    for name, num in names.items():
+        if re.search(r"\b" + name + r"\b", ql):
+            return num
+    m = re.search(r"\b(20\d{2})-(\d{1,2})\b", ql)
+    if m:
+        return int(m.group(2))
+    return None
+def _month_tokens():
+    return {
+        "jan", "january", "feb", "february", "mar", "march", "apr", "april",
+        "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
+        "september", "oct", "october", "nov", "november", "dec", "december",
+    }
+def _want_month_rollup(q):
+    ql = (q or "").lower()
+    if not _month_from_text(q):
+        return False
+    return bool(re.search(
+        r"\b(month|monthly|all days|every day|daily|full|entire|whole|all stores|total|totals|sales|profit|revenue|breakdown|each day)\b",
+        ql,
+    )) or True
+def _day_amount(blob):
+    labeled = []
+    for m in TOTAL_LINE.finditer(blob or ""):
+        n = _parse_money(m.group(2))
+        if n is not None:
+            labeled.append(n)
+    if labeled:
+        return labeled[-1], "labeled_total"
+    amounts = []
+    for m in MONEY_ANY.finditer(blob or ""):
+        n = _parse_money(m.group(1) or m.group(2))
+        if n is not None:
+            amounts.append(n)
+    if amounts:
+        return max(amounts), "largest_dollar"
+    return None, "none"
+def month_day_rollup(question):
+    month = _month_from_text(question)
+    if not month:
+        return ""
+    text = load_export() or ""
+    by_day = {}
+    for b in _split_raw_blocks(text):
+        d = b.get("date")
+        if not d:
+            continue
+        try:
+            if int(str(d)[5:7]) != month:
+                continue
+        except Exception:
+            continue
+        by_day.setdefault(d, []).append(b.get("text") or "")
+    if not by_day:
+        return "MONTH ROLLUP: no dated blocks for month %d in the full export." % month
+    years = sorted({int(d[:4]) for d in by_day})
+    lines = [
+        "MONTH ROLLUP (full export, every dated block, not a sample):",
+        "month=%02d years=%s days_present=%d" % (month, ",".join(str(y) for y in years), len(by_day)),
+    ]
+    running = 0.0
+    scored = 0
+    for day in sorted(by_day):
+        blob = "\n".join(by_day[day])
+        amt, how = _day_amount(blob)
+        if amt is None:
+            lines.append("%s | no $ found | blocks=%d | %s" % (day, len(by_day[day]), how))
+        else:
+            running += amt
+            scored += 1
+            lines.append("%s | $%s | blocks=%d | %s" % (day, "{:,.2f}".format(amt), len(by_day[day]), how))
+    first, last = min(by_day), max(by_day)
+    y, m = int(first[:4]), int(first[5:7])
+    import calendar
+    last_n = calendar.monthrange(y, m)[1]
+    expected = ["%04d-%02d-%02d" % (y, m, d) for d in range(1, last_n + 1)]
+    missing = [d for d in expected if d not in by_day]
+    lines.append("days_with_dollar=%d running_sum=$%s" % (scored, "{:,.2f}".format(running)))
+    lines.append("missing_days_in_%s: %s" % (first[:7], ", ".join(missing) if missing else "none"))
+    lines.append("Do not invent amounts for missing days. running_sum is only days that had a $ figure.")
+    return "\n".join(lines)
 def archive_inventory(question=""):
     text = load_export() or ""
     records = (load_corpus().get("records") or [])
@@ -729,9 +690,7 @@ def archive_inventory(question=""):
         top = sorted(headings.items(), key=lambda x: -x[1])[:30]
         lines.append("recurring short headings: " + "; ".join("%s (%d)" % (k, v) for k, v in top))
     return "\n".join(lines)
-
-
-def search_raw_export(question, limit=80):
+def search_raw_export(question, limit=80, month_all=False):
     text = load_export()
     if not text:
         return []
@@ -740,9 +699,6 @@ def search_raw_export(question, limit=80):
     scored = []
     for b in _split_raw_blocks(text):
         blob = (b.get("text") or "").lower()
-        s = _token_score(blob, tokens)
-        if tokens and s <= 0:
-            continue
         d = b.get("date")
         if month and d:
             try:
@@ -750,40 +706,18 @@ def search_raw_export(question, limit=80):
                     continue
             except Exception:
                 pass
-        scored.append((s, b))
+        elif month and not d:
+            continue
+        s = _token_score(blob, tokens)
+        if not month_all and tokens and s <= 0:
+            continue
+        scored.append((s if s else 1, b))
     scored.sort(key=lambda x: -x[0])
+    if month_all:
+        return [b for s, b in scored]
     return [b for s, b in scored[:limit]]
-
-
-def _month_from_text(q):
-    names = {
-        "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
-        "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6, "july": 7, "jul": 7,
-        "august": 8, "aug": 8, "september": 9, "sept": 9, "sep": 9,
-        "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
-    }
-    ql = (q or "").lower()
-    for name, num in names.items():
-        if re.search(r"\b" + name + r"\b", ql):
-            return num
-    m = re.search(r"\b(20\d{2})-(\d{1,2})\b", ql)
-    if m:
-        return int(m.group(2))
-    return None
-
-
 def _record_blob(r):
     return " ".join(str(r.get(k) or "") for k in ("text", "raw", "actor", "entity", "source_file")).lower()
-
-
-def _month_tokens():
-    return {
-        "jan", "january", "feb", "february", "mar", "march", "apr", "april",
-        "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
-        "september", "oct", "october", "nov", "november", "dec", "december",
-    }
-
-
 def query_facts(question, limit=40):
     q = (question or "").strip()
     if not q:
@@ -802,30 +736,28 @@ def query_facts(question, limit=40):
         facts = [f for f in facts if f.get("upload_id") == latest]
         skipped = max(0, len(uploads) - 1)
     month = _month_from_text(q)
+    rollup = month_day_rollup(q) if month else ""
+    if month:
+        lines = [archive_inventory(q), "", rollup, ""]
+        if latest_only and skipped:
+            lines.insert(2, "Note: %d older upload(s) were excluded because you asked for the latest file only." % skipped)
+        lines.append("Use MONTH ROLLUP as the month table. Missing days are absent from the file, not $0.")
+        return "\n".join(lines)
     need = _query_tokens(q)
     try:
         cap = max(1, min(int(limit or 40), 200))
     except Exception:
         cap = 40
-
-    raw_hits = search_raw_export(q, cap)
+    raw_hits = search_raw_export(q, cap, month_all=False)
     rec_hits = []
     for r in records:
         blob = _record_blob(r)
         s = _token_score(blob, need)
         if need and s <= 0:
             continue
-        d = r.get("date")
-        if month and d:
-            try:
-                if int(str(d)[5:7]) != month:
-                    continue
-            except Exception:
-                pass
         rec_hits.append((s, r))
     rec_hits.sort(key=lambda x: -x[0])
     rec_hits = [r for s, r in rec_hits]
-
     seen_txt = set()
     source_hits = []
     for b in raw_hits:
@@ -843,25 +775,19 @@ def query_facts(question, limit=40):
         source_hits.append({"date": r.get("date"), "text": body, "upload_id": r.get("upload_id")})
     if not source_hits:
         return archive_inventory(q) + "\nNo matching record blocks for %r. Use the FULL FILE SCAN counts above — a zero token hit means the word is not in the file." % q
-
     by_day = {}
     for r in source_hits:
         by_day.setdefault(r.get("date") or "unknown", []).append(r)
-
     scope = "latest upload only" if latest_only else "all uploads"
-    day_list = ", ".join(sorted(by_day))
     lines = [
         archive_inventory(q),
         "",
         "Query: %s" % q,
         "Archive scope: %s (%d upload(s) on file)" % (scope, len(uploads) or 1),
-        "Source: merged extracted text + parsed records",
-        "Matching blocks: %d across %d day(s): %s" % (len(source_hits), len(by_day), day_list),
-        "Do not claim a name is absent unless FULL FILE SCAN token hits are 0. This block list is a subset, not the whole file.",
+        "Matching blocks: %d across %d day(s): %s" % (
+            len(source_hits), len(by_day), ", ".join(sorted(by_day))),
         "",
     ]
-    if latest_only and skipped:
-        lines.insert(2, "Note: %d older upload(s) were excluded because you asked for the latest file only." % skipped)
     shown = 0
     for day in sorted(by_day):
         lines.append("## %s (%d blocks)" % (day, len(by_day[day])))
