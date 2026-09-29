@@ -689,6 +689,47 @@ def _want_latest_only(question):
     ))
 
 
+def archive_inventory(question=""):
+    text = load_export() or ""
+    records = (load_corpus().get("records") or [])
+    tokens = _query_tokens(question)
+    counts = {}
+    for t in tokens:
+        n = 0
+        for v in _expand_token(t):
+            n = max(n, len(re.findall(re.escape(v), text, re.I)))
+        counts[t] = n
+    dates = []
+    for r in records:
+        if r.get("date"):
+            dates.append(str(r["date"]))
+    for b in _split_raw_blocks(text):
+        if b.get("date"):
+            dates.append(str(b["date"]))
+    headings = {}
+    for b in _split_raw_blocks(text):
+        first = (b.get("text") or "").splitlines()[0] if (b.get("text") or "").strip() else ""
+        first = re.sub(r"^\[.*?\]\s*[^:]{0,80}:\s*", "", first).strip()
+        first = re.sub(r"[\u200e\u200f]", "", first)
+        if 1 <= len(first.split()) <= 4 and len(first) <= 40 and not re.search(r"\d", first):
+            if not re.search(r"^(break|back|here|out|in|ok|yes|no|image|audio|video)\b", first, re.I):
+                headings[first] = headings.get(first, 0) + 1
+    dates = sorted(set(dates))
+    lines = [
+        "FULL FILE SCAN (not a sample):",
+        "chars=%d records=%d uploads=%d" % (
+            len(text), len(records), len((load_corpus().get("uploads") or []))),
+        ),
+        "date_range=%s .. %s" % (dates[0] if dates else "?", dates[-1] if dates else "?"),
+    ]
+    if counts:
+        lines.append("query token hits in full text: " + ", ".join("%s=%d" % (k, v) for k, v in counts.items()))
+    if headings:
+        top = sorted(headings.items(), key=lambda x: -x[1])[:30]
+        lines.append("recurring short headings: " + "; ".join("%s (%d)" % (k, v) for k, v in top))
+    return "\n".join(lines)
+
+
 def search_raw_export(question, limit=80):
     text = load_export()
     if not text:
@@ -800,7 +841,7 @@ def query_facts(question, limit=40):
         seen_txt.add(key)
         source_hits.append({"date": r.get("date"), "text": body, "upload_id": r.get("upload_id")})
     if not source_hits:
-        return "No matching records in uploaded archives for %r." % q
+        return archive_inventory(q) + "\nNo matching record blocks for %r. Use the FULL FILE SCAN counts above — a zero token hit means the word is not in the file." % q
 
     by_day = {}
     for r in source_hits:
@@ -808,12 +849,14 @@ def query_facts(question, limit=40):
 
     scope = "latest upload only" if latest_only else "all uploads"
     lines = [
+        archive_inventory(q),
+        "",
         "Query: %s" % q,
         "Archive scope: %s (%d upload(s) on file)" % (scope, len(uploads) or 1),
         "Source: merged extracted text + parsed records",
         "Matching blocks: %d across %d day(s): %s" % (
             len(source_hits), len(by_day), ", ".join(sorted(by_day))),
-        "Raw evidence follows. Interpret it. Do not assume a schema. Do not invent missing days.",
+        "Do not claim a name is absent unless FULL FILE SCAN token hits are 0. This block list is a subset, not the whole file.",
         "",
     ]
     if latest_only and skipped:
