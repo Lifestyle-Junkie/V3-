@@ -29,7 +29,14 @@ TS_PATTERNS = [
 ]
 SENDER_SPLIT = re.compile(r"^\s*(?:[\[\(].*?[\]\)]\s*)?([^:]{1,80})\s*:\s+(.*)$")
 MONEY_ANY = re.compile(r"(?<!\w)(?:USD|EUR|GBP|CAD|\$|€|£)\s*([\d,]+(?:\.\d{1,2})?)|(?<!\w)([\d,]+(?:\.\d{1,2})?)\s*(?:USD|EUR|GBP)", re.I)
-NUM_LABELED = re.compile(r"([A-Za-z][A-Za-z0-9 _/\-]{1,40}?)\s*[:=\-]\s*\$?\s*([\d,]+(?:\.\d{1,2})?)")
+NUM_LABELED = re.compile(
+    r"([A-Za-z][A-Za-z0-9 _/\-]{0,40}?)\s*(?:[:=\-]|\$)\s*\$?\s*([\d,]+(?:\.\d{1,2})?)"
+)
+LINE_AMOUNT = re.compile(
+    r"^\s*([A-Za-z][A-Za-z0-9 ._-]{0,24}?)\s*:?\s*\$?\s*([\d,]+(?:\.\d{1,2})?)\s*$",
+    re.M,
+)
+STORE_LINE = re.compile(r"(?im)^\s*(?:store\s*name|location|site|place)\s*[:\-]\s*(.+)$")
 ISO_DATE = re.compile(r"\b(20\d{2}|19\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b")
 US_DATE = re.compile(r"\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\b")
 
@@ -338,12 +345,29 @@ def link_attachments(records, files):
     return records
 
 
+def _heading_entity(text, actor=None):
+    t = (text or "").strip()
+    if not t:
+        return actor
+    m = STORE_LINE.search(t)
+    if m:
+        return re.sub(r"\s+", " ", m.group(1)).strip(" -:")[:60] or actor
+    first = t.splitlines()[0].strip()
+    first = re.sub(r"[\u200e\u200f]", "", first)
+    if 1 <= len(first.split()) <= 4 and len(first) <= 40 and not re.search(r"\d", first):
+        if not re.search(r"^(break|back|here|out|in|ok|yes|no)\b", first, re.I):
+            return first
+    return actor
+
+
 def _local_facts_from_record(rec):
     facts = []
     text = rec.get("text") or rec.get("raw") or ""
     fields = rec.get("fields") or {}
     date = rec.get("date")
     actor = rec.get("actor")
+    entity = rec.get("entity") or _heading_entity(text, actor)
+    rec["entity"] = entity
     source = rec.get("source_file")
     rid = rec.get("id")
 
@@ -370,11 +394,18 @@ def _local_facts_from_record(rec):
         n = _parse_money(v)
         if n is not None and re.search(r"[\d]", str(v)):
             unit = "currency" if "$" in str(v) or "€" in str(v) or "£" in str(v) else "number"
-            add(str(k).strip() or "value", n, unit, actor, "%s=%s" % (k, v), 0.7, "field")
+            add(str(k).strip() or "value", n, unit, entity, "%s=%s" % (k, v), 0.7, "field")
         elif str(v).strip():
             if re.search(r"date|time", str(k), re.I):
                 continue
-            add(str(k).strip(), str(v).strip(), None, actor, "%s=%s" % (k, v), 0.5, "field")
+            add(str(k).strip(), str(v).strip(), None, entity, "%s=%s" % (k, v), 0.5, "field")
+
+    for m in LINE_AMOUNT.finditer(text):
+        label = re.sub(r"\s+", " ", m.group(1)).strip(" :-")
+        n = _parse_money(m.group(2))
+        if n is None or len(label) < 2:
+            continue
+        add(label, n, "currency" if "$" in m.group(0) else "number", entity, m.group(0), 0.7, "line")
 
     for m in NUM_LABELED.finditer(text):
         label = re.sub(r"\s+", " ", m.group(1)).strip(" :-")
@@ -382,7 +413,7 @@ def _local_facts_from_record(rec):
         if n is None or len(label) < 2:
             continue
         unit = "currency" if "$" in m.group(0) else "number"
-        add(label, n, unit, actor, m.group(0), 0.62, "labeled")
+        add(label, n, unit, entity, m.group(0), 0.62, "labeled")
 
     for m in MONEY_ANY.finditer(text):
         raw = m.group(1) or m.group(2)
@@ -394,7 +425,7 @@ def _local_facts_from_record(rec):
         pref = re.search(r"([A-Za-z][A-Za-z0-9 _/\-]{1,30})\s*$", text[:m.start()])
         if pref:
             label = pref.group(1).strip()
-        add(label, n, "currency", actor, window.strip(), 0.5, "amount")
+        add(label, n, "currency", entity, window.strip(), 0.5, "amount")
 
     if not facts and text.strip():
         add("note", text.strip()[:300], None, actor, text[:240], 0.25, "text")
@@ -527,10 +558,9 @@ def ingest_zip_bytes(raw_bytes, name="upload.zip"):
     })
     slim = []
     for r in records:
-        item = {k: r[k] for k in r}
-        if "fields" in item and len(json.dumps(item["fields"])) > 2000:
-            item["fields"] = {k: str(v)[:200] for k, v in item["fields"].items()}
-        slim.append(item)
+        slim.append({k: r[k] for k in r if k != "fields" or True})
+        if "fields" in slim[-1] and len(json.dumps(slim[-1]["fields"])) > 2000:
+            slim[-1]["fields"] = {k: str(v)[:200] for k, v in slim[-1]["fields"].items()}
     corpus["records"] = [r for r in corpus["records"] if r.get("upload_id") != upload_id]
     for r in slim:
         r["upload_id"] = upload_id
@@ -550,7 +580,7 @@ def ingest_zip_bytes(raw_bytes, name="upload.zip"):
         "kinds": kinds,
         "records": len(records),
         "facts": len(facts),
-        "note": "Archive ingested. Ask questions; Hope will query stored facts, not raw keyword hits.",
+        "note": "Archive ingested. Ask questions; Hope will query stored records, not raw keyword hits.",
     }
 
 
@@ -579,101 +609,88 @@ def _month_from_text(q):
     return None
 
 
+def _record_blob(r):
+    return " ".join(str(r.get(k) or "") for k in ("text", "raw", "actor", "entity", "source_file")).lower()
+
+
+def _month_tokens():
+    return {
+        "jan", "january", "feb", "february", "mar", "march", "apr", "april",
+        "may", "jun", "june", "jul", "july", "aug", "august", "sep", "sept",
+        "september", "oct", "october", "nov", "november", "dec", "december",
+    }
+
+
 def query_facts(question, limit=40):
     q = (question or "").strip()
     if not q:
         return "Ask a question about an uploaded archive."
     facts = load_facts()
-    records = load_corpus().get("records") or []
+    corpus = load_corpus()
+    records = corpus.get("records") or []
+    uploads = corpus.get("uploads") or []
     if not facts and not records:
         return "No uploaded archive on file. Attach a zip first."
     ql = q.lower()
+    want_all = bool(re.search(r"\b(all uploads|every zip|previous zip|older zip|both zips)\b", ql))
+    latest = uploads[-1]["id"] if uploads else None
+    if latest and not want_all:
+        records = [r for r in records if r.get("upload_id") == latest]
+        facts = [f for f in facts if f.get("upload_id") == latest]
     month = _month_from_text(q)
-    tokens = [t for t in re.findall(r"[a-z0-9]{3,}", ql) if t not in {
+    stop = {
         "what", "was", "were", "the", "and", "for", "how", "much", "many",
         "show", "tell", "about", "from", "with", "that", "this", "have",
-    }]
+        "all", "far", "so", "only", "just", "any", "get", "give",
+    }
+    tokens = [t for t in re.findall(r"[a-z0-9]{3,}", ql) if t not in stop]
+    need = [t for t in tokens if t not in _month_tokens()]
+    try:
+        cap = max(1, min(int(limit or 40), 200))
+    except Exception:
+        cap = 40
 
-    def score_fact(f):
-        s = 0
-        blob = " ".join(str(f.get(k) or "") for k in ("entity", "concept", "context", "source")).lower()
-        for t in tokens:
-            if t in blob:
-                s += 2
-        if month and f.get("date"):
+    rec_hits = []
+    for r in records:
+        blob = _record_blob(r)
+        if need and not all(t in blob for t in need):
+            continue
+        d = r.get("date")
+        if month and d:
             try:
-                if int(str(f["date"])[5:7]) == month:
-                    s += 3
-                else:
-                    s -= 2
+                if int(str(d)[5:7]) != month:
+                    continue
             except Exception:
                 pass
-        s += float(f.get("confidence") or 0)
-        if f.get("duplicate"):
-            s -= 1
-        return s
+        rec_hits.append(r)
 
-    ranked = sorted(facts, key=score_fact, reverse=True)
-    picked = [f for f in ranked if score_fact(f) > 0][: max(1, min(int(limit or 40), 80))]
-    if not picked:
-        rec_hits = []
-        for r in records:
-            blob = ((r.get("text") or "") + " " + str(r.get("actor") or "")).lower()
-            if tokens and not any(t in blob for t in tokens):
-                continue
-            if month and r.get("date"):
-                try:
-                    if int(str(r["date"])[5:7]) != month:
-                        continue
-                except Exception:
-                    pass
-            rec_hits.append(r)
-            if len(rec_hits) >= 20:
-                break
-        lines = ["No high-confidence facts matched. Nearby records (not assumed totals):"]
-        for r in rec_hits:
-            lines.append("- %s | %s | %s | %s" % (
-                r.get("date") or "?", r.get("actor") or "?",
-                (r.get("text") or "")[:160],
-                ",".join(r.get("attachments") or []) or "no-attachment",
-            ))
-        if len(rec_hits) == 0:
-            return "No matching facts or records. Re-upload the archive if this is a new file."
-        return "\n".join(lines)
+    if not rec_hits:
+        return "No matching records in uploaded archives for %r." % q
 
-    numeric = [f for f in picked if isinstance(f.get("value"), (int, float))]
+    by_day = {}
+    for r in rec_hits:
+        by_day.setdefault(r.get("date") or "unknown", []).append(r)
+
     lines = [
         "Query: %s" % q,
-        "Matched facts: %d (showing %d). Values are only those extracted as facts, not raw keyword hits." % (
-            len([f for f in ranked if score_fact(f) > 0]), len(picked)),
+        "Archive scope: %s" % ("all uploads" if want_all else "latest upload only"),
+        "Matching records: %d across %d day(s): %s" % (
+            len(rec_hits), len(by_day), ", ".join(sorted(by_day))),
+        "Raw evidence follows. Interpret it. Do not assume a schema. Do not invent missing days.",
+        "",
     ]
-    if numeric:
-        concepts = {}
-        for f in numeric:
-            concepts.setdefault(str(f.get("concept") or "value"), []).append(float(f["value"]))
-        lines.append("Numeric concepts found:")
-        for c, vals in concepts.items():
-            lines.append("  - %s: n=%d sum=%s last=%s" % (
-                c, len(vals), "{:,.2f}".format(sum(vals)), "{:,.2f}".format(vals[-1])))
-    lines.append("")
-    for f in picked[:25]:
-        lines.append(
-            "%s | %s | %s=%s%s | entity=%s | rec=%s | conf=%.2f | method=%s%s"
-            % (
-                f.get("date") or "?",
-                f.get("source") or "?",
-                f.get("concept"),
-                f.get("value"),
-                (" " + f["unit"]) if f.get("unit") else "",
-                f.get("entity") or "?",
-                f.get("source_record") or "?",
-                float(f.get("confidence") or 0),
-                f.get("method") or "?",
-                " | " + f["role_hint"] if f.get("role_hint") else "",
-            )
-        )
-        if f.get("context"):
-            lines.append("    evidence: " + str(f["context"])[:180])
-        if f.get("source_attachment"):
-            lines.append("    attachment: " + f["source_attachment"])
+    shown = 0
+    for day in sorted(by_day):
+        lines.append("## %s (%d records)" % (day, len(by_day[day])))
+        for r in by_day[day]:
+            body = (r.get("text") or r.get("raw") or "").strip()
+            if len(body) > 1200:
+                body = body[:1200] + " …"
+            lines.append("[%s | %s]" % (r.get("date") or "?", r.get("actor") or "?"))
+            lines.append(body)
+            lines.append("")
+            shown += 1
+            if shown >= cap:
+                lines.append("… truncated at %d records. Narrow the question." % cap)
+                return "\n".join(lines)
     return "\n".join(lines)
