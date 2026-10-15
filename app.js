@@ -1,11 +1,33 @@
 if (typeof startThink !== "function") window.startThink = function (el) { if (el) el.textContent = "Searching…"; };
 if (typeof stopThink !== "function") window.stopThink = function () {};
-if (typeof paintBotText !== "function") window.paintBotText = function (el, text) { if (el) el.textContent = text || ""; };
+if (typeof paintBotText !== "function") window.paintBotText = function (el, text) {
+  if (!el) return;
+  el.innerHTML = linkifyBot(text || "");
+};
 if (typeof goToCapitalTab !== "function") window.goToCapitalTab = function () { if (typeof setView === "function") setView("capital"); };
 if (typeof insertChatMapsCard !== "function") window.insertChatMapsCard = function () {};
 if (typeof ensureMap !== "function") window.ensureMap = function () {};
 if (typeof resizeHomeMap !== "function") window.resizeHomeMap = function () {};
 if (typeof goToWeatherTab !== "function") window.goToWeatherTab = function () { if (typeof setView === "function") setView("weather"); };
+
+function linkifyBot(text) {
+  if (!text) return "";
+  let s = String(text);
+  // markdown links [label](url)
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, url) {
+    const safe = url.replace(/"/g, "&quot;");
+    const isMedia = /\/api\/media\/[a-f0-9]+\.mp3/i.test(url);
+    return '<a href="' + safe + '" ' + (isMedia ? 'download ' : '') + 'target="_blank" rel="noopener" style="color:#7ecbff;text-decoration:underline;font-weight:600;">' + label + '</a>';
+  });
+  // bare /api/media/...mp3
+  s = s.replace(/(\/api\/media\/[a-f0-9]+\.mp3)/gi, function (m) {
+    return '<a href="' + m + '" download target="_blank" rel="noopener" style="color:#7ecbff;text-decoration:underline;font-weight:600;">Download MP3</a>';
+  });
+  // basic newlines
+  s = s.replace(/\n/g, "<br>");
+  return s;
+}
+
 const input = document.getElementById("ask");
 const form = document.getElementById("askForm");
 const thread = document.getElementById("thread");
