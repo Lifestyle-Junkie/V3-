@@ -64,7 +64,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory.
 - If a zip was attached this turn, it is ALREADY ingested. Archive evidence may already be in this prompt under "# Uploaded archive". Answer from that first. Call search_export at most ONCE, and only if that block is missing or the question is a new slice. Never loop the same tool with the same arguments. Never invent zeros for missing values.
-- convert_to_mp3: turn an uploaded audio/video file or a public URL (YouTube, SoundCloud, direct link) into an MP3. Returns a download link. Use it when Nick asks to convert, download as mp3, or extract audio.
+- convert_to_mp3: turn an uploaded audio/video file or a public URL (YouTube, SoundCloud, direct link) into an MP3. Returns a download link. Use it when Nick asks to convert, download as mp3, or extract audio. If Nick asks to convert a link or file to mp3, call convert_to_mp3 immediately. Ignore any archive preload unless he is asking about the zip.
 - Stock what-ifs stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
 When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables.
@@ -73,7 +73,7 @@ Always end live answers with:
 Sources:
 - [Title](URL)
 Spoken replies: short, no markdown sources.
-When you get a download URL from convert_to_mp3, include it clearly so Nick can click it.
+When you get a download URL from convert_to_mp3, include the markdown link so Nick can click it.
 """
 TOOLS = [
     {"name": "web_search", "description": "Live web search.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -121,7 +121,7 @@ def run_tool(name, args):
         else:
             result = {"ok": False, "error": "Need url or file_b64"}
         if result.get("ok"):
-            return "MP3 ready. Download: %s (size %s bytes). Tell Nick the link clearly." % (result["url"], result.get("size", "?"))
+            return "MP3 ready. [Download MP3](%s)" % result["url"]
         return "Conversion failed: %s" % result.get("error", "unknown")
     return "Unknown tool: %s" % name
 def claude(messages, system=SYSTEM):
@@ -161,6 +161,14 @@ def last_user_question(msgs):
 def archive_was_ingested(msgs):
     blob = json.dumps(msgs)
     return "Ask questions; use search_export." in blob or '"ok": true' in blob.lower()
+def should_preload_archive(msgs):
+    q = (last_user_question(msgs) or "").lower()
+    keywords = (
+        "zip", "archive", "export", "chat.txt", "whatsapp",
+        "sales", "store", "month", "september", "august", "july", "june",
+        "may", "april", "march", "february", "january",
+    )
+    return any(w in q for w in keywords)
 def preload_archive(msgs):
     if not archive_was_ingested(msgs) and not export_index():
         return ""
@@ -223,7 +231,7 @@ def tool_key(name, args):
 def chat_with_tools(user_messages, extra=""):
     messages = list(user_messages)
     last_text = ""
-    archive = preload_archive(messages)
+    archive = preload_archive(messages) if should_preload_archive(messages) else ""
     system = SYSTEM + (extra or "") + archive
     seen = set()
     search_used = 0
@@ -258,7 +266,7 @@ def chat_with_tools(user_messages, extra=""):
         messages.append({"role": "user", "content": results})
         if not fresh:
             break
-    return last_text or "I already pulled the archive sir. Ask a narrower question about a date, name, or number."
+    return last_text or "I couldn’t finish that request sir. Try again or rephrase."
 def short_spoken(text):
     t = re.sub(r"(?is)\n*Sources:.*", "", text or "").strip()
     t = re.sub(r"[*_`#]+", "", t)
