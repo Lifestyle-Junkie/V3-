@@ -11,7 +11,6 @@ from pathlib import Path
 DIR = Path(__file__).resolve().parent
 MEDIA_DIR = DIR / "hope-media"
 MEDIA_DIR.mkdir(exist_ok=True)
-
 # Keep generated files for 2 hours
 TTL = 7200
 
@@ -27,6 +26,19 @@ def _clean_old():
 def _safe_name(name: str) -> str:
     base = re.sub(r"[^A-Za-z0-9._-]+", "_", name or "audio")[:80]
     return base or "audio"
+
+def _normalize_youtube(url: str) -> str:
+    """Turn Shorts / youtu.be into a normal watch URL so yt-dlp is happier."""
+    url = (url or "").strip()
+    # youtube.com/shorts/ID
+    m = re.search(r"(?:youtube\.com|youtu\.be)/shorts/([A-Za-z0-9_-]{6,})", url, re.I)
+    if m:
+        return "https://www.youtube.com/watch?v=" + m.group(1)
+    # youtu.be/ID
+    m = re.search(r"youtu\.be/([A-Za-z0-9_-]{6,})", url, re.I)
+    if m:
+        return "https://www.youtube.com/watch?v=" + m.group(1)
+    return url
 
 def convert_file_to_mp3(file_bytes: bytes, filename: str) -> dict:
     """Convert an uploaded audio/video file to MP3."""
@@ -56,38 +68,52 @@ def convert_file_to_mp3(file_bytes: bytes, filename: str) -> dict:
 def convert_url_to_mp3(url: str) -> dict:
     """Download a link (YouTube, SoundCloud, direct audio, etc.) and convert to MP3."""
     _clean_old()
-    url = (url or "").strip()
+    url = _normalize_youtube(url)
     if not url.startswith(("http://", "https://")):
         return {"ok": False, "error": "Invalid URL"}
+
     out_id = uuid.uuid4().hex[:12]
-    out_path = MEDIA_DIR / f"{out_id}.mp3"
-    # yt-dlp extracts audio directly to mp3 when possible
+    out_template = str(MEDIA_DIR / f"{out_id}.%(ext)s")
+
     cmd = [
         "yt-dlp",
-        "-x", "--audio-format", "mp3",
+        "-x",
+        "--audio-format", "mp3",
         "--audio-quality", "0",
-        "-o", str(MEDIA_DIR / f"{out_id}.%(ext)s"),
         "--no-playlist",
+        "--no-warnings",
+        "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36",
+        "-o", out_template,
         url,
     ]
     try:
         subprocess.run(cmd, check=True, capture_output=True, timeout=180)
     except Exception as e:
-        return {"ok": False, "error": f"yt-dlp failed: {e}"}
-    # yt-dlp may write .mp3 or need a rename
+        err = ""
+        if hasattr(e, "stderr") and e.stderr:
+            try:
+                err = e.stderr.decode("utf-8", errors="replace")[:400]
+            except Exception:
+                err = str(e)
+        return {"ok": False, "error": f"yt-dlp failed: {err or e}"}
+
     candidates = list(MEDIA_DIR.glob(f"{out_id}.*"))
     if not candidates:
         return {"ok": False, "error": "No output file produced"}
+
     final = candidates[0]
     if final.suffix.lower() != ".mp3":
-        # force convert if needed
         mp3_path = MEDIA_DIR / f"{out_id}.mp3"
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", str(final), "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(mp3_path)],
-            check=True, capture_output=True, timeout=120
-        )
-        final.unlink(missing_ok=True)
-        final = mp3_path
+        try:
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", str(final), "-vn", "-acodec", "libmp3lame", "-q:a", "2", str(mp3_path)],
+                check=True, capture_output=True, timeout=120
+            )
+            final.unlink(missing_ok=True)
+            final = mp3_path
+        except Exception as e:
+            return {"ok": False, "error": f"ffmpeg convert failed: {e}"}
+
     return {
         "ok": True,
         "url": f"/api/media/{out_id}.mp3",
@@ -95,6 +121,6 @@ def convert_url_to_mp3(url: str) -> dict:
         "size": final.stat().st_size,
     }
 
-def get_media_path(file_id: str) -> Path | None:
+def get_media_path(file_id: str):
     p = MEDIA_DIR / f"{file_id}.mp3"
     return p if p.exists() else None
