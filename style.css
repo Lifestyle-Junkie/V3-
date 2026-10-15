@@ -601,3 +601,21 @@ aside.right::-webkit-scrollbar { display: none; }
   height: 0;
   display: none;
 }
+
+/* MP3 download card */
+.mp3-card {
+  font-family: Inter, system-ui, sans-serif;
+  user-select: none;
+}
+.mp3-card a {
+  transition: opacity 0.15s ease, transform 0.1s ease;
+}
+.mp3-card a:hover {
+  opacity: 0.92;
+}
+.mp3-card a:active {
+  transform: scale(0.98);
+}
+.line.bot .txt .mp3-card {
+  white-space: normal;
+}
