@@ -1,32 +1,49 @@
 if (typeof startThink !== "function") window.startThink = function (el) { if (el) el.textContent = "Searching…"; };
 if (typeof stopThink !== "function") window.stopThink = function () {};
-if (typeof paintBotText !== "function") window.paintBotText = function (el, text) {
+
+function mediaCard(url, name) {
+  const safe = String(url || "").replace(/"/g, "&quot;");
+  const label = name || "hope-audio.mp3";
+  return `
+    <div class="mp3-card" style="margin:12px 0 4px;padding:14px 16px;border-radius:16px;background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.12);max-width:420px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <div style="width:28px;height:28px;border-radius:8px;background:#0b1220;display:grid;place-items:center;color:#7ecbff;font-size:14px;">♪</div>
+        <div>
+          <div style="font-weight:600;font-size:14px;color:#e8f1ff;">${label}</div>
+          <div style="font-size:11px;color:#8aa0bf;margin-top:2px;">MP3 audio</div>
+        </div>
+      </div>
+      <div style="font-size:11px;color:#3ee07a;margin:6px 0 12px;">Converted successfully</div>
+      <a href="${safe}" download style="display:block;text-align:center;background:#111;color:#fff;padding:12px 16px;border-radius:999px;font-weight:600;font-size:13px;text-decoration:none;">↓ Download MP3</a>
+    </div>`;
+}
+
+function linkifyBot(text) {
+  if (!text) return "";
+  let s = String(text);
+  const media = s.match(/\/api\/media\/[a-f0-9]+\.mp3/i);
+  if (media) {
+    const url = media[0];
+    s = s.replace(/\[([^\]]+)\]\([^)]+\)/g, "");
+    s = s.replace(url, "");
+    return s.replace(/\n/g, "<br>") + mediaCard(url);
+  }
+  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, url) {
+    return '<a href="' + url.replace(/"/g, "&quot;") + '" target="_blank" rel="noopener" style="color:#7ecbff;text-decoration:underline;">' + label + "</a>";
+  });
+  return s.replace(/\n/g, "<br>");
+}
+
+window.paintBotText = function (el, text) {
   if (!el) return;
   el.innerHTML = linkifyBot(text || "");
 };
+
 if (typeof goToCapitalTab !== "function") window.goToCapitalTab = function () { if (typeof setView === "function") setView("capital"); };
 if (typeof insertChatMapsCard !== "function") window.insertChatMapsCard = function () {};
 if (typeof ensureMap !== "function") window.ensureMap = function () {};
 if (typeof resizeHomeMap !== "function") window.resizeHomeMap = function () {};
 if (typeof goToWeatherTab !== "function") window.goToWeatherTab = function () { if (typeof setView === "function") setView("weather"); };
-
-function linkifyBot(text) {
-  if (!text) return "";
-  let s = String(text);
-  // markdown links [label](url)
-  s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, function (_, label, url) {
-    const safe = url.replace(/"/g, "&quot;");
-    const isMedia = /\/api\/media\/[a-f0-9]+\.mp3/i.test(url);
-    return '<a href="' + safe + '" ' + (isMedia ? 'download ' : '') + 'target="_blank" rel="noopener" style="color:#7ecbff;text-decoration:underline;font-weight:600;">' + label + '</a>';
-  });
-  // bare /api/media/...mp3
-  s = s.replace(/(\/api\/media\/[a-f0-9]+\.mp3)/gi, function (m) {
-    return '<a href="' + m + '" download target="_blank" rel="noopener" style="color:#7ecbff;text-decoration:underline;font-weight:600;">Download MP3</a>';
-  });
-  // basic newlines
-  s = s.replace(/\n/g, "<br>");
-  return s;
-}
 
 const input = document.getElementById("ask");
 const form = document.getElementById("askForm");
