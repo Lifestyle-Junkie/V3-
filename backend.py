@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Hope v3 — local chat + live web search/fetch. Do not share this file."""
+import base64
 import json
 import os
 import re
@@ -23,6 +24,8 @@ from hope_store import (
     robinhood_from_accounts, save_export, search_export, export_index,
     ingest_zip_b64,
 )
+from hope_media import convert_file_to_mp3, convert_url_to_mp3, get_media_path
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("PORT", "8765"))
 DIR = Path(__file__).resolve().parent
@@ -51,7 +54,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 # Context
 - Today is Tuesday, September 29, 2026.
 - Nick lives in Fort Lauderdale, Florida (Eastern Time).
-- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal, search_export.
+- Tools: web_search, web_fetch, read_sheet, read_capital, add_monthly_bill, update_monthly_bill, delete_monthly_bill, set_savings_goal, search_export, convert_to_mp3.
 - Monthly bills are NOT connected to the Google Sheet. Never call read_sheet to add or update a bill.
 - add_monthly_bill: phrase like "rent 1450 due the 1st". Parse name, amount, due day. Do not ask extra questions.
 - update_monthly_bill: change name, amount, due_day, type, or status by bill id or exact name.
@@ -61,6 +64,7 @@ SYSTEM = """You are Hope (H.O.P.E V3), a local AI assistant.
 - read_sheet: only when Nick asks about Accounts, Transactions, or other sheet tabs. Sheet Holdings tab is NOT the Capital holdings screen.
 - Chat history from every topic may be included in the messages. Treat earlier topics as memory.
 - If a zip was attached this turn, it is ALREADY ingested. Archive evidence may already be in this prompt under "# Uploaded archive". Answer from that first. Call search_export at most ONCE, and only if that block is missing or the question is a new slice. Never loop the same tool with the same arguments. Never invent zeros for missing values.
+- convert_to_mp3: turn an uploaded audio/video file or a public URL (YouTube, SoundCloud, direct link) into an MP3. Returns a download link. Use it when Nick asks to convert, download as mp3, or extract audio.
 - Stock what-ifs stay in chat. Do not change the official goal date for a hypothetical.
 # Output style
 When a reply has multiple parts, lists, money, or bills, use ## headings and markdown tables.
@@ -69,6 +73,7 @@ Always end live answers with:
 Sources:
 - [Title](URL)
 Spoken replies: short, no markdown sources.
+When you get a download URL from convert_to_mp3, include it clearly so Nick can click it.
 """
 TOOLS = [
     {"name": "web_search", "description": "Live web search.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}},
@@ -80,6 +85,7 @@ TOOLS = [
     {"name": "update_monthly_bill", "description": "Update a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "due_day": {"type": "integer"}, "amount": {"type": "number"}, "type": {"type": "string"}, "status": {"type": "string"}}, "required": ["id"]}},
     {"name": "delete_monthly_bill", "description": "Delete a bill by id or exact name.", "input_schema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "search_export", "description": "Query an already-ingested zip. Use at most once per turn if archive evidence is not already in the prompt.", "input_schema": {"type": "object", "properties": {"query": {"type": "string"}, "month": {"type": "string"}, "limit": {"type": "integer"}}, "required": ["query"]}},
+    {"name": "convert_to_mp3", "description": "Convert an uploaded file or a public URL into an MP3 and return a download link.", "input_schema": {"type": "object", "properties": {"url": {"type": "string"}, "file_b64": {"type": "string"}, "filename": {"type": "string"}}}},
 ]
 def run_tool(name, args):
     if name == "web_search":
@@ -100,6 +106,23 @@ def run_tool(name, args):
         return delete_monthly_bill(args.get("id", ""))
     if name == "search_export":
         return search_export(args.get("query", ""), args.get("month", ""), args.get("limit", 80))
+    if name == "convert_to_mp3":
+        url = (args.get("url") or "").strip()
+        file_b64 = (args.get("file_b64") or "").strip()
+        filename = args.get("filename") or "upload"
+        if file_b64:
+            try:
+                raw = base64.b64decode(file_b64)
+                result = convert_file_to_mp3(raw, filename)
+            except Exception as e:
+                result = {"ok": False, "error": str(e)}
+        elif url:
+            result = convert_url_to_mp3(url)
+        else:
+            result = {"ok": False, "error": "Need url or file_b64"}
+        if result.get("ok"):
+            return "MP3 ready. Download: %s (size %s bytes). Tell Nick the link clearly." % (result["url"], result.get("size", "?"))
+        return "Conversion failed: %s" % result.get("error", "unknown")
     return "Unknown tool: %s" % name
 def claude(messages, system=SYSTEM):
     payload = json.dumps({"model": MODEL, "max_tokens": 4096, "system": system, "messages": messages, "tools": TOOLS}).encode("utf-8")
@@ -273,6 +296,21 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(js)
+            return
+        if path.startswith("/api/media/") and path.endswith(".mp3"):
+            file_id = path.rsplit("/", 1)[-1].replace(".mp3", "")
+            media_path = get_media_path(file_id)
+            if not media_path or not media_path.exists():
+                self.send_error(404)
+                return
+            data = media_path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Disposition", 'attachment; filename="hope.mp3"')
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            self.wfile.write(data)
             return
         if path == "/api/sc-search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
